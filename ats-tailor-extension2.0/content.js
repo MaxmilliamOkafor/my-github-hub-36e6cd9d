@@ -540,8 +540,11 @@
 
     workdayFlowInProgress = true;
     console.log('[ATS Tailor] 🚀 Starting Workday Full Flow (with Create Account)');
-    createStatusBanner();
-    updateBanner('Workday Flow: Scraping job data...', 'working');
+    
+    // Scrape job first for banner
+    const jobData = scrapeWorkdayJob();
+    createStatusBanner(jobData.title || 'Workday Application');
+    updateBanner('Workday Flow: Starting...', 'working');
 
     try {
       // Load Workday credentials from storage
@@ -774,9 +777,16 @@
     });
   }
 
-  // ============ STATUS BANNER ============
-  function createStatusBanner() {
-    if (document.getElementById('ats-auto-banner')) return;
+  // ============ STATUS BANNER (RIBBON STYLE) ============
+  function createStatusBanner(jobTitle = '') {
+    if (document.getElementById('ats-auto-banner')) {
+      // Update existing banner with job title
+      if (jobTitle) {
+        const statusEl = document.getElementById('ats-banner-status');
+        if (statusEl) statusEl.textContent = `Tailoring for: ${jobTitle}`;
+      }
+      return;
+    }
     
     const banner = document.createElement('div');
     banner.id = 'ats-auto-banner';
@@ -788,26 +798,66 @@
           left: 0;
           right: 0;
           z-index: 999999;
-          background: linear-gradient(135deg, #ff6b35 0%, #ff8c42 100%);
-          padding: 12px 20px;
-          font: bold 14px system-ui, sans-serif;
+          background: linear-gradient(90deg, #e85d04 0%, #f48c06 50%, #faa307 100%);
+          padding: 10px 24px;
+          font: 600 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
           color: #000;
           text-align: center;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-          animation: ats-pulse 2s ease-in-out infinite;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          animation: ats-slide-in 0.4s ease-out, ats-shimmer 3s ease-in-out infinite;
         }
-        @keyframes ats-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.85; }
+        @keyframes ats-slide-in {
+          from { transform: translateY(-100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
-        #ats-auto-banner .ats-status { margin-left: 10px; }
-        #ats-auto-banner.success { background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%); }
-        #ats-auto-banner.error { background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%); color: #fff; }
+        @keyframes ats-shimmer {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+        #ats-auto-banner .ats-rocket { font-size: 18px; animation: ats-rocket-pulse 1.5s ease-in-out infinite; }
+        @keyframes ats-rocket-pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.15); }
+        }
+        #ats-auto-banner .ats-brand { font-weight: 700; color: #000; letter-spacing: 0.5px; }
+        #ats-auto-banner .ats-status { 
+          margin-left: 12px; 
+          font-weight: 500;
+          color: rgba(0,0,0,0.85);
+        }
+        #ats-auto-banner.success { 
+          background: linear-gradient(90deg, #00c853 0%, #00e676 50%, #69f0ae 100%); 
+        }
+        #ats-auto-banner.error { 
+          background: linear-gradient(90deg, #ff1744 0%, #ff5252 100%); 
+          color: #fff; 
+        }
+        #ats-auto-banner .ats-timer {
+          margin-left: 8px;
+          font-size: 12px;
+          opacity: 0.8;
+          font-family: monospace;
+        }
       </style>
-      <span>🚀 ATS TAILOR</span>
-      <span class="ats-status" id="ats-banner-status">Detecting upload fields...</span>
+      <span class="ats-rocket">⚡</span>
+      <span class="ats-brand">ATS TAILOR</span>
+      <span class="ats-status" id="ats-banner-status">${jobTitle ? `Tailoring for: ${jobTitle}` : 'Detecting...'}</span>
+      <span class="ats-timer" id="ats-banner-timer"></span>
     `;
     document.body.appendChild(banner);
+    
+    // Start timer
+    const timerStart = Date.now();
+    const timerEl = document.getElementById('ats-banner-timer');
+    const timerInterval = setInterval(() => {
+      const elapsed = ((Date.now() - timerStart) / 1000).toFixed(1);
+      if (timerEl) timerEl.textContent = `${elapsed}s`;
+      if (!document.getElementById('ats-auto-banner')) clearInterval(timerInterval);
+    }, 100);
   }
 
   function updateBanner(status, type = 'working') {
@@ -1149,7 +1199,163 @@
     return { title, company, location, description, url: window.location.href, platform: platformKey || hostname };
   }
 
-  // ============ AUTO-TAILOR DOCUMENTS ============
+  // ============ LAZYAPPLY CLEANUP ============
+  function removeLazyApplyAttachments() {
+    console.log('[ATS Tailor] Removing LazyApply attachments...');
+    
+    // Find and remove LazyApply file attachments
+    const lazyApplySelectors = [
+      '[class*="lazyapply" i]',
+      '[id*="lazyapply" i]',
+      '[data-source="lazyapply"]',
+    ];
+    
+    // Remove file inputs that have LazyApply files
+    document.querySelectorAll('input[type="file"]').forEach(input => {
+      if (input.files && input.files.length > 0) {
+        const fileName = input.files[0]?.name?.toLowerCase() || '';
+        if (fileName.includes('lazyapply') || fileName.includes('lazy_apply')) {
+          console.log('[ATS Tailor] Removing LazyApply file:', fileName);
+          const dt = new DataTransfer();
+          input.files = dt.files;
+          fireEvents(input);
+        }
+      }
+    });
+    
+    // Click remove buttons near LazyApply elements
+    lazyApplySelectors.forEach(selector => {
+      try {
+        document.querySelectorAll(selector).forEach(el => {
+          const removeBtn = el.querySelector('button[aria-label*="remove" i], .remove-file, [data-qa-remove]');
+          if (removeBtn) removeBtn.click();
+        });
+      } catch {}
+    });
+  }
+
+  // ============ FAST PIPELINE (3 SECONDS TOTAL) ============
+  async function fastAutoTailorPipeline(jobInfo) {
+    const pipelineStart = Date.now();
+    console.log('[ATS Tailor] ⚡ Starting FAST pipeline for:', jobInfo.title);
+    
+    try {
+      // STEP 1: Fast keyword extraction (500ms)
+      updateBanner(`Extracting keywords...`, 'working');
+      const keywords = await fastExtractKeywords(jobInfo.description || document.body.textContent);
+      console.log('[ATS Tailor] Extracted', keywords.length, 'keywords in', Date.now() - pipelineStart, 'ms');
+      
+      // STEP 2: Get session + profile in parallel (already cached usually)
+      const session = await new Promise(resolve => {
+        chrome.storage.local.get(['ats_session'], result => resolve(result.ats_session));
+      });
+      
+      if (!session?.access_token) {
+        updateBanner('Please login via extension popup first', 'error');
+        return null;
+      }
+      
+      // STEP 3: Tailor & Generate PDF (2s)
+      updateBanner(`Tailoring CV for: ${jobInfo.title}...`, 'working');
+      
+      const profileRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${session.user.id}&select=*`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
+      const profileRows = await profileRes.json();
+      const p = profileRows?.[0] || {};
+      
+      // Call tailor API with extracted keywords for faster processing
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/tailor-application`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          jobTitle: jobInfo.title,
+          company: jobInfo.company,
+          location: jobInfo.location,
+          description: jobInfo.description,
+          extractedKeywords: keywords, // Pre-extracted for speed
+          requirements: [],
+          userProfile: {
+            firstName: p.first_name || '',
+            lastName: p.last_name || '',
+            email: p.email || session.user.email || '',
+            phone: p.phone || '',
+            linkedin: p.linkedin || '',
+            github: p.github || '',
+            portfolio: p.portfolio || '',
+            coverLetter: p.cover_letter || '',
+            workExperience: Array.isArray(p.work_experience) ? p.work_experience : [],
+            education: Array.isArray(p.education) ? p.education : [],
+            skills: Array.isArray(p.skills) ? p.skills : [],
+            certifications: Array.isArray(p.certifications) ? p.certifications : [],
+            achievements: Array.isArray(p.achievements) ? p.achievements : [],
+            atsStrategy: p.ats_strategy || '',
+            city: p.city || undefined,
+            country: p.country || undefined,
+          },
+        }),
+      });
+      
+      if (!response.ok) throw new Error('Tailoring API failed');
+      
+      const result = await response.json();
+      const elapsed = ((Date.now() - pipelineStart) / 1000).toFixed(1);
+      console.log('[ATS Tailor] ✅ Pipeline complete in', elapsed, 's, match:', result.matchScore + '%');
+      
+      return { ...result, keywords, profile: p };
+      
+    } catch (error) {
+      console.error('[ATS Tailor] Pipeline error:', error);
+      throw error;
+    }
+  }
+
+  // ============ FAST KEYWORD EXTRACTION (LOCAL) ============
+  function fastExtractKeywords(text) {
+    // Use MandatoryKeywords if available (pre-pass)
+    if (typeof MandatoryKeywords !== 'undefined') {
+      const mandatory = MandatoryKeywords.extractMandatoryFromJD(text);
+      if (mandatory.length >= 10) {
+        return mandatory.slice(0, 35);
+      }
+    }
+    
+    // Fast TF-IDF extraction
+    const stopWords = new Set([
+      'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+      'from', 'as', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does',
+      'will', 'would', 'could', 'should', 'may', 'might', 'must', 'this', 'that', 'these', 'those',
+      'you', 'your', 'we', 'our', 'they', 'their', 'he', 'she', 'it', 'who', 'what', 'which',
+      'about', 'work', 'working', 'job', 'role', 'position', 'candidate', 'looking', 'seeking',
+      'experience', 'years', 'year', 'required', 'preferred', 'plus', 'bonus', 'remote', 'hybrid',
+      'salary', 'benefits', 'team', 'company', 'opportunity', 'join'
+    ]);
+    
+    const words = text.toLowerCase()
+      .replace(/[^a-z0-9\-\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !stopWords.has(w));
+    
+    const freq = {};
+    words.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
+    
+    return Object.entries(freq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 35)
+      .map(([word]) => word);
+  }
+
+  // ============ AUTO-TAILOR DOCUMENTS (FAST VERSION) ============
   async function autoTailorDocuments() {
     if (hasTriggeredTailor || tailoringInProgress) {
       console.log('[ATS Tailor] Already triggered or in progress, skipping');
@@ -1172,118 +1378,51 @@
     hasTriggeredTailor = true;
     tailoringInProgress = true;
     
-    createStatusBanner();
-    updateBanner('Generating tailored CV & Cover Letter...', 'working');
+    // Extract job info first to show in banner
+    const jobInfo = extractJobInfo();
+    
+    // Show banner with job title immediately
+    createStatusBanner(jobInfo.title || 'Job Application');
+    
+    // Remove any LazyApply attachments first
+    removeLazyApplyAttachments();
 
     try {
-      // Get session
-      const session = await new Promise(resolve => {
-        chrome.storage.local.get(['ats_session'], result => resolve(result.ats_session));
-      });
-
-      if (!session?.access_token || !session?.user?.id) {
-        updateBanner('Please login via extension popup first', 'error');
-        console.log('[ATS Tailor] No session, user needs to login');
+      // Use FAST pipeline (3s target)
+      const result = await fastAutoTailorPipeline(jobInfo);
+      
+      if (!result) {
         tailoringInProgress = false;
         return;
       }
-
-      // Get user profile
-      updateBanner('Loading your profile...', 'working');
-      const profileRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${session.user.id}&select=first_name,last_name,email,phone,linkedin,github,portfolio,cover_letter,work_experience,education,skills,certifications,achievements,ats_strategy,city,country,address,state,zip_code`,
-        {
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
-      );
-
-      if (!profileRes.ok) {
-        throw new Error('Could not load profile');
-      }
-
-      const profileRows = await profileRes.json();
-      const p = profileRows?.[0] || {};
-
-      // Extract job info from page
-      const jobInfo = extractJobInfo();
-      if (!jobInfo.title) {
-        updateBanner('Could not detect job info, please use popup', 'error');
-        tailoringInProgress = false;
-        return;
-      }
-
-      console.log('[ATS Tailor] Job detected:', jobInfo.title, 'at', jobInfo.company);
-      updateBanner(`Tailoring for: ${jobInfo.title}...`, 'working');
-
-      // Call tailor API
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/tailor-application`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          jobTitle: jobInfo.title,
-          company: jobInfo.company,
-          location: jobInfo.location,
-          description: jobInfo.description,
-          requirements: [],
-          userProfile: {
-            firstName: p.first_name || '',
-            lastName: p.last_name || '',
-            email: p.email || session.user.email || '',
-            phone: p.phone || '',
-            linkedin: p.linkedin || '',
-            github: p.github || '',
-            portfolio: p.portfolio || '',
-            coverLetter: p.cover_letter || '',
-            workExperience: Array.isArray(p.work_experience) ? p.work_experience : [],
-            education: Array.isArray(p.education) ? p.education : [],
-            skills: Array.isArray(p.skills) ? p.skills : [],
-            certifications: Array.isArray(p.certifications) ? p.certifications : [],
-            achievements: Array.isArray(p.achievements) ? p.achievements : [],
-            atsStrategy: p.ats_strategy || '',
-            city: p.city || undefined,
-            country: p.country || undefined,
-            address: p.address || undefined,
-            state: p.state || undefined,
-            zipCode: p.zip_code || undefined,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Tailoring failed');
-      }
-
-      const result = await response.json();
-      if (result.error) throw new Error(result.error);
-
+      
+      const p = result.profile || {};
+      
       console.log('[ATS Tailor] Tailoring complete! Match score:', result.matchScore);
-      updateBanner(`✅ Generated! Match: ${result.matchScore}% - Attaching files...`, 'success');
+      updateBanner(`✅ Match: ${result.matchScore}% - Attaching files...`, 'success');
 
-      // Store PDFs in chrome.storage for the attach loop
-      const fallbackName = `${(p.first_name || '').trim()}_${(p.last_name || '').trim()}`.replace(/\s+/g, '_') || 'Applicant';
+      // Store PDFs with EXACT original filenames
+      const firstName = (p.first_name || '').trim();
+      const lastName = (p.last_name || '').trim();
+      const baseName = firstName && lastName ? `${firstName}_${lastName}`.replace(/\s+/g, '_') : 'Maxmilliam_Okafor';
+      
+      const cvFileName = `${baseName}_CV.pdf`;
+      const coverFileName = `${baseName}_Cover_Letter.pdf`;
       
       await new Promise(resolve => {
         chrome.storage.local.set({
           cvPDF: result.resumePdf,
           coverPDF: result.coverLetterPdf,
           coverLetterText: result.tailoredCoverLetter || result.coverLetter || '',
-          cvFileName: result.cvFileName || `${fallbackName}_CV.pdf`,
-          coverFileName: result.coverLetterFileName || `${fallbackName}_Cover_Letter.pdf`,
+          cvFileName: cvFileName,
+          coverFileName: coverFileName,
           ats_lastGeneratedDocuments: {
             cv: result.tailoredResume,
             coverLetter: result.tailoredCoverLetter || result.coverLetter,
             cvPdf: result.resumePdf,
             coverPdf: result.coverLetterPdf,
-            cvFileName: result.cvFileName || `${fallbackName}_CV.pdf`,
-            coverFileName: result.coverLetterFileName || `${fallbackName}_Cover_Letter.pdf`,
+            cvFileName: cvFileName,
+            coverFileName: coverFileName,
             matchScore: result.matchScore || 0,
           }
         }, resolve);
@@ -1295,10 +1434,13 @@
         chrome.storage.local.set({ ats_tailored_urls: cached }, resolve);
       });
 
+      // Remove LazyApply attachments again before attaching
+      removeLazyApplyAttachments();
+      
       // Now load files and start attaching
       loadFilesAndStart();
       
-      updateBanner(`✅ Done! Match: ${result.matchScore}% - Files attached!`, 'success');
+      updateBanner(`✅ Done! ${result.matchScore}% match - ${cvFileName} attached!`, 'success');
       hideBanner();
 
     } catch (error) {

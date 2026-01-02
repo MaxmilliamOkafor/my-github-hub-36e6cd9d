@@ -49,6 +49,7 @@
         "https://*.taleo.net/*"
       ],
       "js": [
+        "mandatory-keywords.js",
         "universal-jd-parser.js",
         "reliable-extractor.js",
         "tailor-universal.js",
@@ -76,6 +77,7 @@
         "bulk-apply.html",
         "bulk-apply.css",
         "bulk-apply.js",
+        "mandatory-keywords.js",
         "universal-jd-parser.js",
         "reliable-extractor.js",
         "tailor-universal.js",
