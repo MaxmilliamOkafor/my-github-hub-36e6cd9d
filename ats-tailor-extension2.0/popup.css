@@ -1100,3 +1100,146 @@ body {
 .btn-workday .btn-icon-left {
   font-size: 14px;
 }
+
+/* Skill Gap Analysis */
+.btn-skill-gap {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  background: rgba(124,58,237,0.1);
+  border: 1px solid rgba(124,58,237,0.3);
+  color: #a78bfa;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-skill-gap:hover {
+  background: rgba(124,58,237,0.2);
+  border-color: rgba(124,58,237,0.5);
+}
+
+.btn-skill-gap:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  background: transparent;
+}
+
+/* Skill Gap Panel */
+.skill-gap-panel {
+  background: linear-gradient(135deg, rgba(15,15,35,0.98) 0%, rgba(26,26,62,0.98) 100%);
+  border: 1px solid rgba(124,58,237,0.3);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.skill-gap-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.skill-gap-header .panel-icon {
+  font-size: 16px;
+}
+
+.skill-gap-header .panel-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.skill-gap-header .btn-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.skill-gap-header .btn-close:hover {
+  color: #fff;
+}
+
+.skill-gap-summary {
+  font-size: 11px;
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.skill-gap-summary strong {
+  color: #00d4ff;
+}
+
+.skill-gap-section {
+  margin-bottom: 12px;
+}
+
+.skill-gap-section:last-child {
+  margin-bottom: 0;
+}
+
+.skill-gap-section h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  margin-bottom: 8px;
+}
+
+.skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.skill-chip.core {
+  background: rgba(0,212,255,0.15);
+  border: 1px solid rgba(0,212,255,0.3);
+  color: #00d4ff;
+}
+
+.skill-chip.gap {
+  background: rgba(255,107,53,0.15);
+  border: 1px solid rgba(255,107,53,0.3);
+  color: #ff8c42;
+}
+
+.skill-chip .chip-count {
+  font-size: 9px;
+  opacity: 0.7;
+  background: rgba(255,255,255,0.1);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+.no-gaps {
+  font-size: 11px;
+  color: #2ed573;
+  font-style: italic;
+}

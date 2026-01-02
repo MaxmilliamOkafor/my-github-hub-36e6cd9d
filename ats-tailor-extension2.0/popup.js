@@ -186,6 +186,10 @@ class ATSTailor {
     
     // AI Extract Keywords Button (GPT-4o-mini powered)
     document.getElementById('aiExtractBtn')?.addEventListener('click', () => this.aiExtractKeywords());
+    
+    // Skill Gap Analysis Button
+    document.getElementById('skillGapBtn')?.addEventListener('click', () => this.showSkillGapPanel());
+    document.getElementById('closeSkillGap')?.addEventListener('click', () => this.hideSkillGapPanel());
 
     // Workday Full Flow
     document.getElementById('runWorkdayFlow')?.addEventListener('click', () => this.runWorkdayFlow());
@@ -928,6 +932,8 @@ class ATSTailor {
       }
     }
   }
+
+  /**
    * OPTIMIZED: Fast single-pass keyword extraction fallback
    */
   fastKeywordExtraction(text) {
@@ -1133,17 +1139,31 @@ class ATSTailor {
     };
 
     try {
-      // ============ STEP 1: Extract Keywords (OPTIMIZED with caching) ============
+      // ============ PARALLEL STEP 1: Extract Keywords + Load Profile simultaneously ============
       updateStep(1, 'working');
-      updateProgress(5, 'Step 1/3: Extracting keywords from job description...');
+      updateProgress(5, 'Step 1/3: Extracting keywords & loading profile...');
 
       await this.refreshSessionIfNeeded();
       if (!this.session?.access_token || !this.session?.user?.id) {
         throw new Error('Please sign in again');
       }
 
-      // OPTIMIZED: Extract keywords with caching
-      const keywords = this.extractKeywordsOptimized(this.currentJob?.description || '');
+      // PARALLEL PROCESSING: Run keyword extraction and profile fetch simultaneously
+      const [keywords, profileRes] = await Promise.all([
+        // Task 1: Extract keywords (fast, cached)
+        Promise.resolve(this.extractKeywordsOptimized(this.currentJob?.description || '')),
+        
+        // Task 2: Fetch user profile (API call)
+        fetch(
+          `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${this.session.user.id}&select=first_name,last_name,email,phone,linkedin,github,portfolio,cover_letter,work_experience,education,skills,certifications,achievements,ats_strategy,city,country,address,state,zip_code`,
+          {
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${this.session.access_token}`,
+            },
+          }
+        )
+      ]);
       
       // Store keywords immediately for UI
       this.generatedDocuments.keywords = keywords;
@@ -1155,23 +1175,16 @@ class ATSTailor {
         this.generatedDocuments.matchScore = 0;
         this.updateMatchAnalysisUI(); // Show all keywords as "missing" initially
       }
+      
+      // Save keywords to history for comparison feature
+      await this.saveKeywordsToHistory(keywords);
 
       console.log('[ATS Tailor] Step 1 - Extracted keywords:', keywords.all?.length || 0);
       updateStep(1, 'complete');
 
-      // ============ STEP 2: Load Profile & Generate Base CV ============
+      // ============ STEP 2: Generate Base CV & Cover Letter ============
       updateStep(2, 'working');
       updateProgress(20, 'Step 2/3: Generating tailored CV & Cover Letter...');
-
-      const profileRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${this.session.user.id}&select=first_name,last_name,email,phone,linkedin,github,portfolio,cover_letter,work_experience,education,skills,certifications,achievements,ats_strategy,city,country,address,state,zip_code`,
-        {
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${this.session.access_token}`,
-          },
-        }
-      );
 
       if (!profileRes.ok) {
         throw new Error('Could not load profile. Open the QuantumHire app and complete your profile.');
@@ -1590,6 +1603,253 @@ class ATSTailor {
       toast.classList.remove('show');
       setTimeout(() => toast.remove(), 300);
     }, 3000);
+  }
+
+  // ============ KEYWORD HISTORY & COMPARISON FEATURE ============
+
+  /**
+   * Save extracted keywords to history for skill gap analysis
+   * @param {Object} keywords - Extracted keywords object
+   */
+  async saveKeywordsToHistory(keywords) {
+    if (!keywords?.all?.length || !this.currentJob) return;
+    
+    try {
+      const historyEntry = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        jobTitle: this.currentJob.title || 'Unknown Position',
+        company: this.currentJob.company || 'Unknown Company',
+        url: this.currentJob.url || '',
+        keywords: {
+          all: keywords.all,
+          highPriority: keywords.highPriority || [],
+          mediumPriority: keywords.mediumPriority || [],
+          lowPriority: keywords.lowPriority || []
+        }
+      };
+      
+      // Get existing history
+      const result = await chrome.storage.local.get(['ats_keyword_history']);
+      const history = result.ats_keyword_history || [];
+      
+      // Add new entry and keep last 20 job postings
+      history.unshift(historyEntry);
+      if (history.length > 20) history.pop();
+      
+      await chrome.storage.local.set({ ats_keyword_history: history });
+      console.log('[ATS Tailor] Saved keywords to history:', historyEntry.jobTitle);
+    } catch (error) {
+      console.warn('[ATS Tailor] Failed to save keyword history:', error);
+    }
+  }
+
+  /**
+   * Get keyword history for comparison
+   * @returns {Promise<Array>} Keyword history entries
+   */
+  async getKeywordHistory() {
+    const result = await chrome.storage.local.get(['ats_keyword_history']);
+    return result.ats_keyword_history || [];
+  }
+
+  /**
+   * Compare keywords between multiple job postings to identify skill gaps
+   * @param {Array<string>} entryIds - IDs of history entries to compare
+   * @returns {Object} Comparison results with common keywords and gaps
+   */
+  async compareKeywords(entryIds = []) {
+    const history = await this.getKeywordHistory();
+    
+    // If no IDs provided, compare all entries
+    const entries = entryIds.length > 0
+      ? history.filter(h => entryIds.includes(h.id))
+      : history;
+    
+    if (entries.length < 2) {
+      return { 
+        error: 'Need at least 2 job postings to compare',
+        entries: entries.length 
+      };
+    }
+    
+    // Count keyword frequency across all jobs
+    const keywordFrequency = new Map();
+    const keywordJobs = new Map();
+    
+    for (const entry of entries) {
+      const allKeywords = entry.keywords?.all || [];
+      for (const kw of allKeywords) {
+        const kwLower = kw.toLowerCase();
+        keywordFrequency.set(kwLower, (keywordFrequency.get(kwLower) || 0) + 1);
+        
+        if (!keywordJobs.has(kwLower)) {
+          keywordJobs.set(kwLower, []);
+        }
+        keywordJobs.get(kwLower).push(entry.jobTitle);
+      }
+    }
+    
+    // Categorize keywords by frequency
+    const totalJobs = entries.length;
+    const commonKeywords = []; // Appears in 70%+ of jobs
+    const frequentKeywords = []; // Appears in 40-69% of jobs
+    const rareKeywords = []; // Appears in <40% of jobs
+    
+    for (const [keyword, count] of keywordFrequency.entries()) {
+      const ratio = count / totalJobs;
+      const keywordInfo = {
+        keyword,
+        count,
+        percentage: Math.round(ratio * 100),
+        jobs: keywordJobs.get(keyword)
+      };
+      
+      if (ratio >= 0.7) {
+        commonKeywords.push(keywordInfo);
+      } else if (ratio >= 0.4) {
+        frequentKeywords.push(keywordInfo);
+      } else {
+        rareKeywords.push(keywordInfo);
+      }
+    }
+    
+    // Sort by frequency
+    commonKeywords.sort((a, b) => b.count - a.count);
+    frequentKeywords.sort((a, b) => b.count - a.count);
+    rareKeywords.sort((a, b) => b.count - a.count);
+    
+    // Identify skill gaps (common keywords user might be missing)
+    const userSkills = new Set(
+      (this.generatedDocuments?.cv || '').toLowerCase().split(/\W+/)
+    );
+    
+    const skillGaps = commonKeywords
+      .filter(k => !userSkills.has(k.keyword))
+      .slice(0, 15);
+    
+    return {
+      totalJobsCompared: totalJobs,
+      commonKeywords: commonKeywords.slice(0, 20),
+      frequentKeywords: frequentKeywords.slice(0, 15),
+      rareKeywords: rareKeywords.slice(0, 10),
+      skillGaps,
+      summary: {
+        totalUniqueKeywords: keywordFrequency.size,
+        coreSkillsCount: commonKeywords.length,
+        gapsIdentified: skillGaps.length
+      }
+    };
+  }
+
+  /**
+   * Show skill gap analysis modal
+   */
+  async showSkillGapAnalysis() {
+    try {
+      const comparison = await this.compareKeywords();
+      
+      if (comparison.error) {
+        this.showToast(comparison.error, 'error');
+        return;
+      }
+      
+      // Build and show results
+      const gapsList = comparison.skillGaps.map(g => g.keyword).join(', ') || 'None identified';
+      const commonList = comparison.commonKeywords.slice(0, 10).map(k => k.keyword).join(', ');
+      
+      console.log('[ATS Tailor] Skill Gap Analysis:', comparison);
+      this.showToast(
+        `Analyzed ${comparison.totalJobsCompared} jobs. ${comparison.summary.gapsIdentified} potential skill gaps found.`,
+        'success'
+      );
+      
+      // Store comparison for UI display
+      this.lastComparison = comparison;
+      
+      return comparison;
+    } catch (error) {
+      console.error('[ATS Tailor] Skill gap analysis error:', error);
+      this.showToast('Failed to analyze skill gaps', 'error');
+    }
+  }
+
+  /**
+   * Show skill gap analysis panel with results
+   */
+  async showSkillGapPanel() {
+    const panel = document.getElementById('skillGapPanel');
+    const btn = document.getElementById('skillGapBtn');
+    
+    if (btn) {
+      btn.disabled = true;
+      btn.querySelector('.btn-text').textContent = 'Analyzing...';
+    }
+    
+    try {
+      const comparison = await this.showSkillGapAnalysis();
+      
+      if (!comparison || comparison.error) {
+        // Check if we have any history
+        const history = await this.getKeywordHistory();
+        if (history.length < 2) {
+          this.showToast('Tailor at least 2 different job postings first to compare skills', 'error');
+          return;
+        }
+        return;
+      }
+      
+      // Populate core skills
+      const coreChips = document.getElementById('coreSkillsChips');
+      if (coreChips) {
+        coreChips.innerHTML = comparison.commonKeywords
+          .map(k => `<span class="skill-chip core" title="Found in ${k.percentage}% of jobs">${this.escapeHtml(k.keyword)} <span class="chip-count">${k.count}</span></span>`)
+          .join('');
+      }
+      
+      // Populate skill gaps
+      const gapsChips = document.getElementById('gapsChips');
+      if (gapsChips) {
+        if (comparison.skillGaps.length > 0) {
+          gapsChips.innerHTML = comparison.skillGaps
+            .map(k => `<span class="skill-chip gap" title="In-demand skill missing from your CV">${this.escapeHtml(k.keyword)} <span class="chip-count">${k.percentage}%</span></span>`)
+            .join('');
+        } else {
+          gapsChips.innerHTML = '<span class="no-gaps">Great! No significant skill gaps detected.</span>';
+        }
+      }
+      
+      // Update summary
+      const summary = document.getElementById('skillGapSummary');
+      if (summary) {
+        summary.innerHTML = `<p>Analyzed <strong>${comparison.totalJobsCompared} job postings</strong>. Found <strong>${comparison.summary.totalUniqueKeywords}</strong> unique keywords with <strong>${comparison.summary.coreSkillsCount}</strong> appearing frequently.</p>`;
+      }
+      
+      // Show panel
+      if (panel) {
+        panel.classList.remove('hidden');
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      
+    } catch (error) {
+      console.error('[ATS Tailor] Show skill gap panel error:', error);
+      this.showToast('Failed to analyze skills', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.querySelector('.btn-text').textContent = 'Skill Gap Analysis';
+      }
+    }
+  }
+
+  /**
+   * Hide skill gap analysis panel
+   */
+  hideSkillGapPanel() {
+    const panel = document.getElementById('skillGapPanel');
+    if (panel) {
+      panel.classList.add('hidden');
+    }
   }
 }
 
