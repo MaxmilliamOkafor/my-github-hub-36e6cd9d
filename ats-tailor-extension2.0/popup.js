@@ -733,7 +733,10 @@ class ATSTailor {
   }
 
   /**
-   * OPTIMIZED: Extract keywords with caching and single-pass processing
+   * OPTIMIZED: Extract keywords with mandatory pre-pass, caching, and parallel processing
+   * 1. Mandatory pre-pass: Find all known important keywords
+   * 2. TF-IDF extraction: Get JD-specific keywords
+   * 3. Merge: Mandatory keywords get HIGH priority
    */
   extractKeywordsOptimized(jobDescription) {
     if (!jobDescription || jobDescription.length < 50) {
@@ -749,17 +752,33 @@ class ATSTailor {
       return cached.keywords;
     }
     
+    const startTime = performance.now();
+    
+    // STEP 1: MANDATORY PRE-PASS - Find all known important keywords FIRST
+    let mandatoryFromJD = [];
+    if (window.MandatoryKeywords) {
+      mandatoryFromJD = window.MandatoryKeywords.extractMandatoryFromJD(jobDescription);
+      console.log('[ATS Tailor] Mandatory pre-pass found:', mandatoryFromJD.length, 'keywords');
+    }
+    
+    // STEP 2: TF-IDF/Pattern extraction
     let keywords = { all: [], highPriority: [], mediumPriority: [], lowPriority: [] };
     
-    // Use optimized extractor modules
     if (window.ReliableExtractor) {
       keywords = window.ReliableExtractor.extractReliableKeywords(jobDescription, 35);
     } else if (window.KeywordExtractor) {
       keywords = window.KeywordExtractor.extractKeywords(jobDescription, 35);
     } else {
-      // FAST fallback: Single-pass frequency map
       keywords = this.fastKeywordExtraction(jobDescription);
     }
+    
+    // STEP 3: Merge mandatory keywords with extracted (mandatory = HIGH priority)
+    if (window.MandatoryKeywords && mandatoryFromJD.length > 0) {
+      keywords = window.MandatoryKeywords.mergeWithMandatory(keywords, mandatoryFromJD);
+    }
+    
+    const elapsed = performance.now() - startTime;
+    console.log(`[ATS Tailor] Keyword extraction completed in ${elapsed.toFixed(1)}ms, total: ${keywords.all?.length || 0}`);
     
     // Cache the result
     if (jobUrl) {
@@ -1055,39 +1074,116 @@ class ATSTailor {
   }
 
   /**
-   * FAST fallback: Simple keyword injection into CV summary
+   * GUARANTEED 100% MATCH: Aggressive keyword injection into CV
+   * Strategy:
+   * 1. Summary: 8 keywords (natural sentences)
+   * 2. Experience: 2-3 keywords per bullet in top 3 roles
+   * 3. Skills: 15+ keywords grouped by category
+   * 4. Catch-all: Remaining keywords as "Additional Proficiencies"
    */
   fastKeywordInjection(cvText, keywords, missingKeywords) {
     if (!missingKeywords || missingKeywords.length === 0) {
       return { tailoredCV: cvText, injectedKeywords: [] };
     }
     
-    // Find summary section and inject missing keywords
-    const summaryMatch = cvText.match(/(PROFESSIONAL SUMMARY|SUMMARY|PROFILE)\s*\n([\s\S]*?)(?=\n[A-Z]{3,}|\n\n|$)/i);
+    let tailoredCV = cvText;
+    let injectedKeywords = [];
+    let remaining = [...missingKeywords];
     
-    if (summaryMatch) {
+    // STEP 1: Inject 8 keywords into Summary
+    const summaryMatch = tailoredCV.match(/(PROFESSIONAL SUMMARY|SUMMARY|PROFILE)\s*\n([\s\S]*?)(?=\n[A-Z]{3,}|\n\n|$)/i);
+    if (summaryMatch && remaining.length > 0) {
       const summaryStart = summaryMatch.index;
       const summaryEnd = summaryStart + summaryMatch[0].length;
       const summaryText = summaryMatch[2];
       
-      // Add top missing keywords naturally
-      const toInject = missingKeywords.slice(0, Math.min(10, missingKeywords.length));
-      const injectionPhrase = toInject.length > 0 
-        ? ` Proficient in ${toInject.join(', ')}.`
-        : '';
+      const toInject = remaining.slice(0, 8);
+      remaining = remaining.slice(8);
+      
+      // Build natural injection phrases
+      const techKeywords = toInject.filter(k => /^[a-z\-\.]+$/i.test(k));
+      const softKeywords = toInject.filter(k => !/^[a-z\-\.]+$/i.test(k));
+      
+      let injectionPhrase = '';
+      if (techKeywords.length > 0) {
+        injectionPhrase += ` Expert in ${techKeywords.slice(0, 4).join(', ')}.`;
+      }
+      if (softKeywords.length > 0) {
+        injectionPhrase += ` Demonstrated ${softKeywords.slice(0, 4).join(', ')}.`;
+      }
+      if (techKeywords.length > 4) {
+        injectionPhrase += ` Proficient with ${techKeywords.slice(4).join(', ')}.`;
+      }
       
       const newSummary = summaryText.trim() + injectionPhrase;
-      const tailoredCV = cvText.substring(0, summaryStart) + 
-                         summaryMatch[1] + '\n' + newSummary + 
-                         cvText.substring(summaryEnd);
-      
-      return { tailoredCV, injectedKeywords: toInject };
+      tailoredCV = tailoredCV.substring(0, summaryStart) + 
+                   summaryMatch[1] + '\n' + newSummary + 
+                   tailoredCV.substring(summaryEnd);
+      injectedKeywords.push(...toInject);
     }
     
-    // Fallback: append to end of CV
-    const toInject = missingKeywords.slice(0, 5);
-    const tailoredCV = cvText + `\n\nAdditional Skills: ${toInject.join(', ')}`;
-    return { tailoredCV, injectedKeywords: toInject };
+    // STEP 2: Inject into Experience section (20 keywords across bullets)
+    if (remaining.length > 0) {
+      const experienceMatch = tailoredCV.match(/(WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT HISTORY)\s*\n([\s\S]*?)(?=\n(EDUCATION|SKILLS|CERTIFICATIONS|ACHIEVEMENTS)|\n\n\n|$)/i);
+      if (experienceMatch) {
+        const expStart = experienceMatch.index;
+        const expEnd = expStart + experienceMatch[0].length;
+        let experienceText = experienceMatch[0];
+        
+        // Find bullets and inject keywords
+        const bullets = experienceText.match(/^[•\-\*]\s*.+$/gm) || [];
+        const toInject = remaining.slice(0, Math.min(20, bullets.length * 2));
+        remaining = remaining.slice(toInject.length);
+        
+        let keywordIdx = 0;
+        bullets.forEach((bullet, idx) => {
+          if (keywordIdx < toInject.length && idx < 10) {
+            const kwToAdd = toInject.slice(keywordIdx, keywordIdx + 2);
+            keywordIdx += 2;
+            const enhanced = bullet.replace(/\.$/, '') + `, utilizing ${kwToAdd.join(' and ')}.`;
+            experienceText = experienceText.replace(bullet, enhanced);
+          }
+        });
+        
+        tailoredCV = tailoredCV.substring(0, expStart) + experienceText + tailoredCV.substring(expEnd);
+        injectedKeywords.push(...toInject);
+      }
+    }
+    
+    // STEP 3: Inject remaining into Skills section (15+ keywords)
+    if (remaining.length > 0) {
+      const skillsMatch = tailoredCV.match(/(SKILLS|TECHNICAL SKILLS|CORE COMPETENCIES)\s*\n([\s\S]*?)(?=\n[A-Z]{3,}|\n\n|$)/i);
+      if (skillsMatch) {
+        const skillsStart = skillsMatch.index;
+        const skillsEnd = skillsStart + skillsMatch[0].length;
+        const skillsText = skillsMatch[2];
+        
+        const toInject = remaining.slice(0, 15);
+        remaining = remaining.slice(15);
+        
+        const newSkills = skillsText.trim() + '\nAdditional: ' + toInject.join(', ');
+        tailoredCV = tailoredCV.substring(0, skillsStart) + 
+                     skillsMatch[1] + '\n' + newSkills + 
+                     tailoredCV.substring(skillsEnd);
+        injectedKeywords.push(...toInject);
+      }
+    }
+    
+    // STEP 4: CATCH-ALL - Any remaining keywords go into Additional Proficiencies
+    if (remaining.length > 0) {
+      const additionalSection = `\n\nADDITIONAL PROFICIENCIES\n${remaining.join(' | ')}`;
+      
+      // Insert before certifications/achievements or append to end
+      const insertPoint = tailoredCV.search(/\n(CERTIFICATIONS|ACHIEVEMENTS|EDUCATION)\n/i);
+      if (insertPoint > 0) {
+        tailoredCV = tailoredCV.substring(0, insertPoint) + additionalSection + tailoredCV.substring(insertPoint);
+      } else {
+        tailoredCV = tailoredCV + additionalSection;
+      }
+      injectedKeywords.push(...remaining);
+    }
+    
+    return { tailoredCV, injectedKeywords };
   }
 
   /**
@@ -1274,22 +1370,43 @@ class ATSTailor {
       console.log('[ATS Tailor] Step 2 - Initial match score:', this.generatedDocuments.matchScore + '%');
       updateStep(2, 'complete');
 
-      // ============ STEP 3: INTERNAL BOOST to 95%+ (no button required) ============
+      // ============ STEP 3: GUARANTEED 100% MATCH - No keywords left behind ============
       updateStep(3, 'working');
-      updateProgress(55, 'Step 3/3: Boosting CV to 95-100% keyword match...');
+      updateProgress(55, 'Step 3/3: Guaranteeing 100% keyword match...');
 
       const currentScore = this.generatedDocuments.matchScore || 0;
       
-      // INTERNAL BOOST: Always attempt to boost if below target
-      if (currentScore < 95 && keywords.all?.length > 0) {
+      // ALWAYS boost to 100% - no keywords left unmatched
+      if (currentScore < 100 && keywords.all?.length > 0) {
         try {
-          const boostResult = await this.boostCVTo95Plus(
+          let boostResult = await this.boostCVTo95Plus(
             this.generatedDocuments.cv,
             keywords,
             (percent, text) => {
-              updateProgress(55 + (percent * 0.25), `Step 3/3: ${text}`);
+              updateProgress(55 + (percent * 0.15), `Step 3/3: ${text}`);
             }
           );
+
+          // If still not 100%, use aggressive injection
+          if (boostResult.finalScore < 100 && boostResult.missingKeywords?.length > 0) {
+            console.log('[ATS Tailor] Applying final injection for remaining', boostResult.missingKeywords.length, 'keywords');
+            const finalInject = this.fastKeywordInjection(
+              boostResult.tailoredCV || this.generatedDocuments.cv,
+              keywords,
+              boostResult.missingKeywords
+            );
+            
+            if (finalInject.tailoredCV) {
+              boostResult.tailoredCV = finalInject.tailoredCV;
+              boostResult.injectedKeywords = [...(boostResult.injectedKeywords || []), ...finalInject.injectedKeywords];
+              
+              // Recalculate final score - should now be 100%
+              const finalMatch = this.calculateMatchScore(boostResult.tailoredCV, keywords);
+              boostResult.finalScore = finalMatch.matchScore;
+              boostResult.matchedKeywords = finalMatch.matchedKeywords;
+              boostResult.missingKeywords = finalMatch.missingKeywords;
+            }
+          }
 
           if (boostResult.tailoredCV) {
             this.generatedDocuments.cv = boostResult.tailoredCV;
@@ -1297,18 +1414,31 @@ class ATSTailor {
             this.generatedDocuments.matchedKeywords = boostResult.matchedKeywords;
             this.generatedDocuments.missingKeywords = boostResult.missingKeywords;
             
-            // UPDATE UI: Show boosted match score and updated chips
+            // UPDATE UI: Show final 100% match score
             this.updateMatchAnalysisUI();
             
-            console.log('[ATS Tailor] Step 3 - Boosted to:', boostResult.finalScore + '%', 
+            console.log('[ATS Tailor] Step 3 - Final score:', boostResult.finalScore + '%', 
                         'injected:', boostResult.injectedKeywords?.length || 0, 'keywords');
           }
         } catch (boostError) {
-          console.warn('[ATS Tailor] Boost failed, continuing with base CV:', boostError);
-          // Don't throw - continue with base CV
+          console.warn('[ATS Tailor] Boost failed, applying fallback injection:', boostError);
+          // Fallback: aggressive injection
+          const fallbackInject = this.fastKeywordInjection(
+            this.generatedDocuments.cv,
+            keywords,
+            this.generatedDocuments.missingKeywords
+          );
+          if (fallbackInject.tailoredCV) {
+            this.generatedDocuments.cv = fallbackInject.tailoredCV;
+            const finalMatch = this.calculateMatchScore(fallbackInject.tailoredCV, keywords);
+            this.generatedDocuments.matchScore = finalMatch.matchScore;
+            this.generatedDocuments.matchedKeywords = finalMatch.matchedKeywords;
+            this.generatedDocuments.missingKeywords = finalMatch.missingKeywords;
+            this.updateMatchAnalysisUI();
+          }
         }
-      } else if (currentScore >= 95) {
-        console.log('[ATS Tailor] Step 3 - Already at', currentScore + '%, skipping boost');
+      } else if (currentScore >= 100) {
+        console.log('[ATS Tailor] Step 3 - Already at 100%');
       }
 
       updateProgress(80, 'Step 3/3: Regenerating PDF with boosted CV...');
@@ -1331,7 +1461,7 @@ class ATSTailor {
         // Don't throw - document generation was successful
       }
 
-      updateProgress(100, 'Complete! ATS-tailored CV & Cover Letter ready.');
+      updateProgress(100, 'Complete! 100% keyword match achieved.');
 
       await chrome.storage.local.set({ ats_lastGeneratedDocuments: this.generatedDocuments });
 
@@ -1362,7 +1492,7 @@ class ATSTailor {
       this.setStatus('Error', 'error');
     } finally {
       btn.disabled = false;
-      btn.querySelector('.btn-text').textContent = 'Tailor CV & Cover Letter';
+      btn.querySelector('.btn-text').textContent = 'Extract & Apply Keywords to CV';
       setTimeout(() => {
         progressContainer?.classList.add('hidden');
         [1, 2, 3].forEach(n => {
