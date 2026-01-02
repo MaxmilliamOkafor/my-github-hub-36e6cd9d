@@ -112,6 +112,34 @@
             </button>
           </div>
           <p class="boost-description">Extract keywords from job description for ATS optimization</p>
+          
+          <!-- Skill Gap Analysis -->
+          <button id="skillGapBtn" class="btn btn-outline btn-skill-gap" title="Compare keywords across job postings to identify skill gaps">
+            <span class="btn-icon">📊</span>
+            <span class="btn-text">Skill Gap Analysis</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Skill Gap Results Panel (hidden by default) -->
+      <div class="skill-gap-panel hidden" id="skillGapPanel">
+        <div class="skill-gap-header">
+          <span class="panel-icon">📊</span>
+          <span class="panel-title">Skill Gap Analysis</span>
+          <button id="closeSkillGap" class="btn-close" title="Close">×</button>
+        </div>
+        <div class="skill-gap-content">
+          <div class="skill-gap-summary" id="skillGapSummary">
+            <p>Compare keywords from multiple job postings to identify in-demand skills you may be missing.</p>
+          </div>
+          <div class="skill-gap-section" id="coreSkillsSection">
+            <h4>🎯 Most In-Demand Skills</h4>
+            <div class="skill-chips" id="coreSkillsChips"></div>
+          </div>
+          <div class="skill-gap-section" id="gapsSection">
+            <h4>⚠️ Potential Skill Gaps</h4>
+            <div class="skill-chips" id="gapsChips"></div>
+          </div>
         </div>
       </div>
 
