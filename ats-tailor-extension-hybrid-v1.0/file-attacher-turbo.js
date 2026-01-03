@@ -292,9 +292,23 @@
     async attachToCoverField(file, text = null) {
       const startTime = performance.now();
       
-      // Try file attachment first
+      // GREENHOUSE FIX: Click "Attach" button first to reveal file input
+      this.clickGreenhouseCoverAttach();
+      
+      // Brief wait for file input to appear after clicking Attach
+      await new Promise(r => setTimeout(r, 50));
+      
+      // Try file attachment
       if (file) {
-        const result = await this.attachToFirstMatch(file, 'cover');
+        let result = await this.attachToFirstMatch(file, 'cover');
+        
+        // If no cover field found, try clicking Attach again and retry
+        if (!result) {
+          this.clickGreenhouseCoverAttach();
+          await new Promise(r => setTimeout(r, 100));
+          result = await this.attachToFirstMatch(file, 'cover');
+        }
+        
         if (result) {
           const timing = performance.now() - startTime;
           console.log(`[FileAttacher] Cover Letter file attached in ${timing.toFixed(0)}ms`);
@@ -333,12 +347,45 @@
         }
       });
 
+      // GREENHOUSE COVER LETTER: Click "Attach" button in Cover Letter section specifically
+      this.clickGreenhouseCoverAttach();
+
       // Make hidden inputs visible
       document.querySelectorAll('input[type="file"]').forEach(input => {
         if (input.offsetParent === null) {
           input.style.cssText = 'display:block !important; visibility:visible !important; opacity:1 !important; position:relative !important;';
         }
       });
+    },
+
+    // ============ GREENHOUSE COVER LETTER ATTACH BUTTON CLICK ============
+    clickGreenhouseCoverAttach() {
+      // Find the Cover Letter section by label text
+      const allLabels = document.querySelectorAll('label, h3, h4, span, div, fieldset');
+      for (const label of allLabels) {
+        const text = (label.textContent || '').trim().toLowerCase();
+        if (text.includes('cover letter') && text.length < 30) {
+          // Found Cover Letter label - look for "Attach" button nearby
+          const container = label.closest('fieldset') || label.closest('.field') || label.closest('section') || label.parentElement?.parentElement;
+          if (!container) continue;
+          
+          // Look for Attach button (first option in Greenhouse)
+          const buttons = container.querySelectorAll('button, a[role="button"], [class*="attach"]');
+          for (const btn of buttons) {
+            const btnText = (btn.textContent || '').trim().toLowerCase();
+            if (btnText === 'attach' || btnText.includes('attach')) {
+              console.log('[FileAttacher] 📎 Clicking Greenhouse Cover Letter "Attach" button');
+              try { 
+                btn.click(); 
+                return true;
+              } catch (e) {
+                console.warn('[FileAttacher] Failed to click Attach button:', e);
+              }
+            }
+          }
+        }
+      }
+      return false;
     },
 
     // ============ CREATE PDF FILE FROM BASE64 ============

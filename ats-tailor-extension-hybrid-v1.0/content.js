@@ -337,10 +337,38 @@
     return attached;
   }
 
+  // ============ GREENHOUSE COVER LETTER ATTACH BUTTON CLICK ============
+  function clickGreenhouseCoverAttach() {
+    const allLabels = document.querySelectorAll('label, h3, h4, span, div, fieldset');
+    for (const label of allLabels) {
+      const text = (label.textContent || '').trim().toLowerCase();
+      if (text.includes('cover letter') && text.length < 30) {
+        const container = label.closest('fieldset') || label.closest('.field') || label.closest('section') || label.parentElement?.parentElement;
+        if (!container) continue;
+        
+        const buttons = container.querySelectorAll('button, a[role="button"], [class*="attach"]');
+        for (const btn of buttons) {
+          const btnText = (btn.textContent || '').trim().toLowerCase();
+          if (btnText === 'attach' || btnText.includes('attach')) {
+            console.log('[ATS Tailor] 📎 Clicking Greenhouse Cover Letter "Attach" button');
+            try { 
+              btn.click(); 
+              return true;
+            } catch (e) {}
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   // ============ FORCE COVER REPLACE (4.0 PROVEN LOGIC) ============
   function forceCoverReplace() {
     if (!coverFile && !coverLetterText) return false;
     let attached = false;
+
+    // GREENHOUSE FIX: Click "Attach" button first to reveal file input
+    clickGreenhouseCoverAttach();
 
     if (coverFile) {
       document.querySelectorAll('input[type="file"]').forEach((input) => {
@@ -389,6 +417,9 @@
         try { btn.click(); } catch {}
       }
     });
+
+    // GREENHOUSE FIX: Click "Attach" button for Cover Letter section
+    clickGreenhouseCoverAttach();
 
     document.querySelectorAll('input[type="file"]').forEach(input => {
       if (input.offsetParent === null) {
