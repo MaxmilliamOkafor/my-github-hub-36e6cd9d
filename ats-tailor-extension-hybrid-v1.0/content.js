@@ -50,6 +50,7 @@
   let coverLetterText = '';
   let hasTriggeredTailor = false;
   let tailoringInProgress = false;
+  let bannerRoleName = '';
   const startTime = Date.now();
   const currentJobUrl = window.location.href;
 
@@ -59,21 +60,17 @@
   }
 
   function updateStatus(type, status) {
-    const banner = document.getElementById('ats-banner-status');
-    if (banner) {
-      if (type === 'cv' && status === '✅') {
-        banner.textContent = 'CV attached ✅';
-      } else if (type === 'cover' && status === '✅') {
-        banner.textContent = 'CV + Cover Letter attached ✅';
-      }
-    }
+    // Keep banner copy stable (role name only). We only flip banner state to success.
+    if (status !== '✅') return;
+    const banner = document.getElementById('ats-auto-banner');
+    if (banner) banner.classList.add('success');
   }
 
   // ============ STATUS BANNER (PERSISTENT - ONLY CLOSES VIA X BUTTON) ============
-  // FIXED: Removed meaningless 0% progress display - only shows status text
+  // Banner copy stays SIMPLE: "🚀 ATS TAILOR Tailoring for: [Role]" (no % progress text).
   function createStatusBanner() {
     if (document.getElementById('ats-auto-banner')) return document.getElementById('ats-auto-banner');
-    
+
     const banner = document.createElement('div');
     banner.id = 'ats-auto-banner';
     banner.innerHTML = `
@@ -100,7 +97,6 @@
           0%, 100% { opacity: 1; }
           50% { opacity: 0.85; }
         }
-        #ats-auto-banner .ats-status { margin-left: 10px; font-weight: 500; }
         #ats-auto-banner.success { background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%); animation: none; }
         #ats-auto-banner.error { background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%); color: #fff; }
         #ats-auto-banner.extracting { background: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%); color: #fff; }
@@ -123,31 +119,42 @@
         }
         #ats-auto-banner .ats-close-btn:hover { opacity: 1; background: rgba(0,0,0,0.2); }
       </style>
-      <span>🚀 ATS HYBRID</span>
-      <span class="ats-status" id="ats-banner-status">Detecting upload fields...</span>
+      <span id="ats-banner-title">🚀 ATS TAILOR Tailoring for: Job</span>
       <button class="ats-close-btn" title="Close banner">×</button>
     `;
-    
+
     // ONLY CLOSES VIA X BUTTON - NO AUTO-HIDE
     banner.querySelector('.ats-close-btn').addEventListener('click', () => {
       banner.remove();
     });
-    
+
     document.body.appendChild(banner);
     return banner;
   }
 
-  function updateBanner(status, type = 'working') {
+  function updateBanner(message, type = 'working') {
     const banner = document.getElementById('ats-auto-banner') || createStatusBanner();
-    const statusEl = document.getElementById('ats-banner-status');
+    const titleEl = document.getElementById('ats-banner-title');
+
     if (banner) {
-      // Use classList properly for SVG compatibility
       banner.classList.remove('success', 'error', 'extracting');
       if (type === 'success') banner.classList.add('success');
       else if (type === 'error') banner.classList.add('error');
       else if (type === 'extracting') banner.classList.add('extracting');
     }
-    if (statusEl) statusEl.textContent = status;
+
+    if (!titleEl) return;
+
+    // Keep banner copy stable (role name only). Only override on error.
+    if (type === 'error') {
+      titleEl.textContent = message;
+      return;
+    }
+
+    const role = (bannerRoleName || '').trim();
+    titleEl.textContent = role
+      ? `🚀 ATS TAILOR Tailoring for: ${role}`
+      : message;
   }
 
   // PERSISTENT BANNER - Does NOT auto-hide. Only closes via X button.
@@ -648,6 +655,7 @@
       const p = profileRows?.[0] || {};
 
       const jobInfo = extractJobInfo();
+      bannerRoleName = jobInfo.title || 'Job';
       if (!jobInfo.title) {
         updateBanner('Could not detect job info, please use popup', 'error');
         tailoringInProgress = false;
@@ -692,7 +700,7 @@
         
         try {
           const atsPackage = await OpenResumeGenerator.generateATSPackage(
-            candidateData.summary || buildBaseCV(candidateData),
+            buildBaseCV(candidateData),
             localKeywords,
             {
               title: jobInfo.title,
@@ -742,8 +750,12 @@
         });
 
         if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || 'Tailoring failed');
+          const errorText = await response.text().catch(() => '');
+          const isHtml = /^\s*</.test((errorText || '').trim());
+          const msg = response.status === 502
+            ? 'Service temporarily unavailable (502). Please retry in a few seconds.'
+            : (!isHtml && errorText ? errorText : `Tailoring failed (${response.status})`);
+          throw new Error(msg);
         }
 
         const result = await response.json();
@@ -997,7 +1009,8 @@
       setTimeout(() => {
         createStatusBanner();
         const jobInfo = extractJobInfo();
-        updateBanner(`🚀 ATS TAILOR Tailoring for: ${jobInfo.title || 'Job'}`, 'extracting');
+        bannerRoleName = jobInfo.title || 'Job';
+        updateBanner(`🚀 ATS TAILOR Tailoring for: ${bannerRoleName}`, 'extracting');
         console.log(`[ATS Tailor] Banner shown at ${(performance.now() - pipelineStart).toFixed(0)}ms`);
       }, LAZYAPPLY_TIMING.BANNER_SHOW);
       

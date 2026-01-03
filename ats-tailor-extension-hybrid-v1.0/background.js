@@ -101,14 +101,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       pending_extract_apply: {
         jobInfo: message.jobInfo,
         timestamp: Date.now(),
-        triggeredFromAutomation: true
+        triggeredFromAutomation: true,
+        showButtonAnimation: message.showButtonAnimation !== false
       }
     });
     
     // Try to send to popup (may fail if popup not open)
     chrome.runtime.sendMessage({
       action: 'POPUP_TRIGGER_EXTRACT_APPLY',
-      jobInfo: message.jobInfo
+      jobInfo: message.jobInfo,
+      showButtonAnimation: message.showButtonAnimation !== false
     }).catch(() => {
       console.log('[ATS Tailor Background] Popup not open, stored pending trigger');
     });

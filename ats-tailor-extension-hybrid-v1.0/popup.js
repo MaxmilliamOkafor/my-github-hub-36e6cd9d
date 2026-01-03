@@ -270,22 +270,22 @@ class ATSTailor {
     const result = await new Promise(resolve => {
       chrome.storage.local.get(['pending_extract_apply'], resolve);
     });
-    
+
     if (result.pending_extract_apply?.triggeredFromAutomation) {
       const pendingTrigger = result.pending_extract_apply;
       const age = Date.now() - (pendingTrigger.timestamp || 0);
-      
+
       // Only process if trigger is recent (within 30 seconds)
       if (age < 30000) {
         console.log('[ATS Tailor Popup] Found pending automation trigger, executing...');
-        
-        // Clear the pending trigger
+
+        // Clear the pending trigger first (prevents double-runs)
         await chrome.storage.local.remove(['pending_extract_apply']);
-        
-        // Wait for DOM to be ready and session loaded
-        setTimeout(() => {
-          this.triggerExtractApplyWithUI(pendingTrigger.jobInfo);
-        }, 500);
+
+        // Trigger immediately (visible button animation)
+        requestAnimationFrame(() => {
+          this.triggerExtractApplyWithUI(pendingTrigger.jobInfo, true);
+        });
       } else {
         // Clear stale trigger
         await chrome.storage.local.remove(['pending_extract_apply']);
@@ -1613,8 +1613,12 @@ class ATSTailor {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Server error');
+        const errorText = await response.text().catch(() => '');
+        const isHtml = /^\s*</.test((errorText || '').trim());
+        const msg = response.status === 502
+          ? 'Service temporarily unavailable (502). Please retry in a few seconds.'
+          : (!isHtml && errorText ? errorText : `Server error (${response.status})`);
+        throw new Error(msg);
       }
 
       const result = await response.json();
@@ -1945,13 +1949,21 @@ class ATSTailor {
         }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.pdf) {
-          this.generatedDocuments.cvPdf = result.pdf;
-          this.generatedDocuments.cvFileName = result.fileName || this.generatedDocuments.cvFileName;
-          console.log('[ATS Tailor] PDF regenerated via backend:', result.fileName);
-        }
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        const isHtml = /^\s*</.test((errorText || '').trim());
+        const msg = response.status === 502
+          ? 'Service temporarily unavailable (502) during PDF generation.'
+          : (!isHtml && errorText ? errorText : `PDF generation failed (${response.status})`);
+        console.warn('[ATS Tailor] Backend PDF generation failed:', msg);
+        return;
+      }
+
+      const result = await response.json();
+      if (result.pdf) {
+        this.generatedDocuments.cvPdf = result.pdf;
+        this.generatedDocuments.cvFileName = result.fileName || this.generatedDocuments.cvFileName;
+        console.log('[ATS Tailor] PDF regenerated via backend:', result.fileName);
       }
     } catch (error) {
       console.error('[ATS Tailor] Backend PDF generation failed:', error);
