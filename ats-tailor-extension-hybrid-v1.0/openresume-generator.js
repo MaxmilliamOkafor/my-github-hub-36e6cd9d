@@ -389,20 +389,43 @@
 
           if (needsMore.length === 0) return bullet;
 
-          // Inject 1-2 keywords
+          // Inject 1-2 keywords (natural placement inside the sentence)
           const toInject = needsMore.slice(0, config.maxPerBullet);
           let enhanced = bullet;
 
+          const insertKeywordNaturally = (text, kw, phrase) => {
+            const lower = (text || '').toLowerCase();
+            if (lower.includes(kw.toLowerCase())) return text;
+
+            // Prefer inserting right after strong action verbs
+            const verbMatch = text.match(/^(Led|Managed|Developed|Built|Created|Implemented|Designed|Engineered|Delivered|Owned|Optimized|Automated)\b/i);
+            if (verbMatch) {
+              const idx = verbMatch[0].length;
+              return `${text.slice(0, idx)} ${kw}-driven${text.slice(idx)}`;
+            }
+
+            // Prefer inserting near first comma (keeps it readable)
+            const commaIdx = text.indexOf(',');
+            if (commaIdx > 20 && commaIdx < text.length / 2) {
+              return `${text.slice(0, commaIdx)}, ${phrase} ${kw}${text.slice(commaIdx)}`;
+            }
+
+            // Prefer inserting before final period
+            if (text.endsWith('.')) {
+              return `${text.slice(0, -1)}, ${phrase} ${kw}.`;
+            }
+
+            return `${text}, ${phrase} ${kw}`;
+          };
+
           toInject.forEach(kw => {
             if (mentions[kw] >= maxMentions) return;
-
             const phrase = getPhrase();
-            if (enhanced.endsWith('.')) {
-              enhanced = enhanced.slice(0, -1) + `, ${phrase} ${kw}.`;
-            } else {
-              enhanced = enhanced + ` ${phrase} ${kw}`;
+            const next = insertKeywordNaturally(enhanced, kw, phrase);
+            if (next !== enhanced) {
+              enhanced = next;
+              mentions[kw]++;
             }
-            mentions[kw]++;
           });
 
           return enhanced;
@@ -733,7 +756,7 @@
       y += 12;
 
       // === SALUTATION ===
-      addText('Dear Hiring Team,', false, font.body);
+      addText('Dear Hiring Manager,', false, font.body);
       y += 8;
 
       // === PARAGRAPH 1: Interest + Keywords ===
@@ -805,7 +828,7 @@
         company,
         jobData?.location || '',
         '',
-        'Dear Hiring Team,',
+        'Dear Hiring Manager,',
         '',
         `I am excited to apply for the ${jobTitle} position at ${company}. With experience in ${highPriority.slice(0, 2).join(' and ')}, I deliver measurable business impact through innovative solutions.`,
         '',
