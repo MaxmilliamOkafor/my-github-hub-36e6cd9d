@@ -309,10 +309,17 @@
     },
 
     // ============ NORMALIZE LOCATION ============
+    // FIXED: Remove "Remote", "| open to relocation" and other suffixes
     normalizeLocation(location) {
       if (!location) return '';
-      // Remove country codes, normalize format
       return location
+        // Remove "| Remote", "| open to relocation", etc.
+        .replace(/\s*\|\s*(Remote|open to relocation|worldwide|global)\s*/gi, '')
+        // Remove standalone "Remote" prefix
+        .replace(/^Remote\s*[\-\|,]?\s*/i, '')
+        // Remove trailing "Remote"
+        .replace(/\s*[\-\|,]?\s*Remote$/i, '')
+        // Remove country codes at end
         .replace(/,\s*(US|USA|United States)$/i, '')
         .replace(/,\s*(UK|United Kingdom)$/i, '')
         .trim();

@@ -246,37 +246,30 @@ function extractJobCity(jdLocation: string | undefined, jdDescription: string, j
   return null;
 }
 
-// Smart location logic - formats as "[CITY] | open to relocation" for CV ONLY
+// Smart location logic - returns CLEAN location for CV (NO "| Remote" suffix)
+// FIXED: User requested removal of "| Remote" from CV location field
 function getSmartLocation(jdLocation: string | undefined, jdDescription: string, profileCity?: string, profileCountry?: string, jobUrl?: string, preExtractedCity?: string): string {
   // Priority 1: Use city pre-extracted by extension if provided
   if (preExtractedCity && preExtractedCity.trim().length > 0) {
     console.log(`Using pre-extracted city from extension: ${preExtractedCity}`);
-    return `${preExtractedCity} | open to relocation`;
+    return preExtractedCity;
   }
   
   // Priority 2: Extract city from job listing
   const extractedCity = extractJobCity(jdLocation, jdDescription, jobUrl);
   
-  // If we found a city in the job listing, use it with relocation suffix
+  // If we found a city in the job listing, use it (clean, no suffix)
   if (extractedCity) {
-    return `${extractedCity} | open to relocation`;
+    return extractedCity;
   }
   
-  // Check if job is remote
-  const jdText = `${jdLocation || ''} ${jdDescription}`.toLowerCase();
-  if (/\b(remote|worldwide|global|anywhere|distributed|work from home|wfh)\b/.test(jdText)) {
-    if (profileCity && profileCountry) {
-      return `${profileCity} | Remote`;
-    }
-    return "Remote | open to relocation";
-  }
-  
-  // Fallback to profile location with relocation suffix
+  // Priority 3: Use profile location for remote jobs
   if (profileCity) {
-    return `${profileCity} | open to relocation`;
+    return profileCity;
   }
   
-  return "Remote | open to relocation";
+  // Fallback: Return user's default location preference or empty
+  return profileCity || "";
 }
 
 // Jobscan-style keyword extraction - enhanced for ATS ranking

@@ -783,8 +783,8 @@
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
           const isHtml = /^\s*</.test((errorText || '').trim());
-          const msg = response.status === 502
-            ? 'Service temporarily unavailable (502). Please retry in a few seconds.'
+          const msg = (response.status === 502 || response.status === 503)
+            ? `Service temporarily unavailable (${response.status}). Please retry in a few seconds.`
             : (!isHtml && errorText ? errorText : `Tailoring failed (${response.status})`);
           throw new Error(msg);
         }
