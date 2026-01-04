@@ -311,13 +311,12 @@ function isValidLocation(text) {
 }
 
 function extractLocationFromPageText(text) {
-  if (!text) return 'Remote';
+  if (!text) return '';
   
   const limitedText = text.substring(0, 10000);
   
   const patterns = [
     /(?:Location|Office|Based in|Work from|Headquarters)[:\s]+([A-Za-z\s,]+?)(?:\n|\.|\||$)/i,
-    /\b(Remote)\s*(?:[\-\–\|,]\s*)?([A-Za-z\s,]+)?/i,
     /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2}),?\s*(USA|US|United States)?\b/,
     /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b/,
     /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*(United States|USA|UK|United Kingdom|Canada|Australia|Germany|France|Ireland|Netherlands|Singapore|India)\b/i,
@@ -333,40 +332,44 @@ function extractLocationFromPageText(text) {
     }
   }
   
-  return 'Remote';
+  // Return empty string instead of "Remote" - let the calling code decide the fallback
+  return '';
 }
 
 /**
  * FIXED: Normalize location for CV - handles city duplication
+ * REMOVED: "Remote" suffix - user requested clean location only
  * "Stockholm, Stockholm, Sweden" → "Stockholm, Sweden"
  * "Hong Kong, Hong Kong SAR" → "Hong Kong SAR"
  * "Rock Hill, SC" → "Rock Hill, SC, United States"
+ * "Remote (US)" → "United States" (extracts country, removes "Remote" prefix)
  */
 function normalizeLocationForCV(rawLocation) {
-  if (!rawLocation) return 'Remote';
+  if (!rawLocation) return '';
   
   let location = rawLocation.trim()
     .replace(/[\(\)\[\]]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   
-  // Handle Remote
+  // FIXED: Handle Remote - extract country/location part only, no "Remote" text
   if (/\b(remote|work from home|wfh|virtual)\b/i.test(location)) {
     const countryMatch = location.match(/(?:remote|virtual|wfh|work from home)\s*(?:[\-\–\|,]\s*)?(.+)/i);
     if (countryMatch && countryMatch[1]?.trim()) {
       const country = normalizeCountry(countryMatch[1].trim());
-      return `Remote (${country})`;
+      return country; // Return just the country, no "Remote" prefix
     }
-    return 'Remote';
+    // Pure remote with no location - return empty string (will use profile city)
+    return '';
   }
   
-  // Handle Hybrid
+  // Handle Hybrid - extract city part only
   if (/\bhybrid\b/i.test(location)) {
     const cityMatch = location.match(/hybrid\s*(?:[\-\–\|,]\s*)?(.+)/i);
     if (cityMatch && cityMatch[1]?.trim()) {
-      return `Hybrid - ${deduplicateAndFormat(cityMatch[1].trim())}`;
+      return deduplicateAndFormat(cityMatch[1].trim());
     }
-    return 'Hybrid';
+    return '';
   }
   
   // CRITICAL FIX: Remove duplicates before further processing
@@ -380,7 +383,7 @@ function normalizeLocationForCV(rawLocation) {
  * "Singapore, Singapore" → "Singapore"
  */
 function deduplicateAndFormat(location) {
-  if (!location) return 'Remote';
+  if (!location) return '';
   
   // Split by comma and deduplicate (case-insensitive)
   const parts = location.split(/,\s*/);
@@ -399,7 +402,7 @@ function deduplicateAndFormat(location) {
     uniqueParts.push(trimmed);
   }
   
-  if (uniqueParts.length === 0) return 'Remote';
+  if (uniqueParts.length === 0) return '';
   
   // If only one part, try to infer country from city
   if (uniqueParts.length === 1) {
