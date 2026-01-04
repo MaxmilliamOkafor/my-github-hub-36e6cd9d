@@ -332,7 +332,6 @@ function extractLocationFromPageText(text) {
     }
   }
   
-  // Return empty string instead of "Remote" - let the calling code decide the fallback
   return '';
 }
 
