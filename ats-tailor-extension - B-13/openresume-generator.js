@@ -933,7 +933,7 @@
 
     // ============ HELPER: Extract Company Name with Multi-Source Fallback ============
     extractCompanyName(jobData) {
-      if (!jobData) return 'the company';
+      if (!jobData) return '';
       
       // Try jobData.company first
       let company = jobData.company || '';
@@ -981,9 +981,9 @@
           .trim();
       }
       
-      // Final fallback
+      // No fallback - leave empty if company not found
       if (isInvalid(company)) {
-        company = 'the company';
+        company = '';
       }
       
       return company;

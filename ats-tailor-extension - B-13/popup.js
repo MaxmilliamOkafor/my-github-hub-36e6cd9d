@@ -2815,9 +2815,9 @@ function extractJobInfoFromPageInjected() {
     if (result.company) {
       result.company = result.company.replace(/\s*(careers|jobs|hiring|apply|work|join)\s*$/i, '').trim();
     }
-    // Final fallback
+    // No fallback - leave empty if company not found
     if (!result.company || result.company.toLowerCase() === 'company' || result.company.length < 2) {
-      result.company = 'the company';
+      result.company = '';
     }
 
     // --- Cleanup ---
