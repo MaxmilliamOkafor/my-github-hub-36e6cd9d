@@ -633,7 +633,11 @@ serve(async (req) => {
       console.log(`[User ${userId}] Profile loaded: ${rawData.userProfile.firstName} ${rawData.userProfile.lastName}`);
     }
     
-    const { jobTitle, company, description, requirements, location, extractedCity, jobId, userProfile, includeReferral } = validateRequest(rawData);
+    const { jobTitle, company: rawCompany, description, requirements, location, extractedCity, jobId, userProfile, includeReferral } = validateRequest(rawData);
+    
+    // Sanitize company name - remove invalid/generic values
+    const invalidCompanyNames = ['company', 'the company', 'your company', 'unknown', 'n/a', ''];
+    const company = invalidCompanyNames.includes((rawCompany || '').toLowerCase().trim()) ? '' : rawCompany;
     
     // Validate that profile has required info
     if (!userProfile.firstName || !userProfile.lastName) {
@@ -657,7 +661,7 @@ serve(async (req) => {
       });
     }
 
-    console.log(`[User ${userId}] Tailoring application for ${jobTitle} at ${company}`);
+    console.log(`[User ${userId}] Tailoring application for ${jobTitle}${company ? ` at ${company}` : ''}`);
 
     // Smart location logic - extract job city and format as "[CITY] | open to relocation"
     // Priority: 1) extractedCity from extension, 2) extract from location/description, 3) profile city
@@ -820,7 +824,7 @@ ${JSON.stringify(userProfile.achievements, null, 2)}
    
    Date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
    
-   Re: Application for ${jobTitle}
+   Re: ${jobTitle}
    
    Dear Hiring Committee,
    
@@ -828,6 +832,11 @@ ${JSON.stringify(userProfile.achievements, null, 2)}
    
    Sincerely,
    ${candidateName}
+
+   CRITICAL COVER LETTER RULES:
+   - DO NOT include a company name header line (no "Company" or "${company}" as a standalone line)
+   - Start with candidate name header, then contact info, then date, then "Re: [Job Title]", then salutation
+   - If company name is unknown/generic, DO NOT mention it - just reference "the team" or "your organization" instead
 
 ${includeReferral ? `
 3) CREATE REFERRAL EMAIL:
