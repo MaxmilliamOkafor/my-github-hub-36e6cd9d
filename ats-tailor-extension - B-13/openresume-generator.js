@@ -792,8 +792,9 @@
       // Extract info
       const name = data.contact.name;
       const jobTitle = jobData?.title || 'the open position';
-      // ROBUST: Extract company name with multi-source fallback
-      let company = this.extractCompanyName(jobData);
+      // ROBUST: Extract company name with multi-source fallback - use "your organization" if empty
+      let rawCompany = this.extractCompanyName(jobData);
+      const company = rawCompany && rawCompany.trim() ? rawCompany : 'your organization';
       // ROBUST: Ensure keywords is always an array before slicing
       const keywordsArray = Array.isArray(keywords) ? keywords : (keywords?.all || keywords?.highPriority || []);
       const highPriority = Array.isArray(keywordsArray) ? keywordsArray.slice(0, 5) : [];
