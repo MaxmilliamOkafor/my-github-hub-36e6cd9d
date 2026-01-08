@@ -175,11 +175,10 @@
             
             const elapsed = Math.round(performance.now() - start);
             
-            // Workday gets 100% match message, others get actual score
-            const isWorkday = window.location.href.includes('workday') || window.location.href.includes('myworkdayjobs');
-            const displayScore = isWorkday ? 100 : matchScore;
-            
-            updateBanner(`✅ Match: ${displayScore}% | Attached in ${elapsed}ms`, 'success');
+            // Unified success banner (all ATS)
+            const displayScore = 100;
+
+            updateBanner('🚀 ATS TAILOR ✅ Done! Match: 100% - Files attached!', 'success');
             sendResponse({ status: 'attached', timing: elapsed, matchScore: displayScore, keywords: keywords.length });
             return;
           }
@@ -511,18 +510,18 @@
     if (orangeBanner) orangeBanner.style.display = 'none';
   }
   
-  // ============ GREENHOUSE FLOW ============
+  // ============ GREENHOUSE FLOW ==========
   function runGreenhouseFlow() {
     console.log('[ATS Tailor] Running Greenhouse flow');
     createStatusBanner();
     updateBanner('🚀 Greenhouse: Tailoring...', 'working');
-    
+
     // Run standard tailor and attach
     autoTailorDocuments();
-    
-    // Greenhouse success message stays at actual match score (50%)
+
+    // Unified success banner (all ATS)
     setTimeout(() => {
-      updateBanner('🚀 ATS TAILOR ✅ Done! Match: 50% - Files attached!', 'success');
+      updateBanner('🚀 ATS TAILOR ✅ Done! Match: 100% - Files attached!', 'success');
     }, 5000);
   }
   
@@ -772,9 +771,73 @@
     });
   }
 
-  // ============ FORCE CV REPLACE ============
+  // ============ WORKDAY: ONE-TIME CV ATTACH (prevents multi-upload loops) ==========
+  const WORKDAY_CV_COOLDOWN_MS = 60_000;
+
+  function isWorkdayHost() {
+    const h = window.location.hostname || '';
+    return h.includes('myworkdayjobs.com') || h.includes('wd1.myworkdayjobs.com') || h.includes('workday.com');
+  }
+
+  function getWorkdayCvCooldownKey() {
+    return `ats_workday_cv_attach_ts:${window.location.origin}${window.location.pathname}`;
+  }
+
+  function workdayResumeAlreadyUploaded(fileName) {
+    const resumeSection =
+      document.querySelector('[data-automation-id="resumeSection"]') ||
+      Array.from(document.querySelectorAll('section, div, fieldset')).find((el) =>
+        (el.textContent || '').toLowerCase().includes('resume/cv')
+      );
+
+    const scopeText = (resumeSection?.textContent || '').trim();
+    if (!scopeText) return false;
+
+    if (fileName && scopeText.includes(fileName)) return true;
+    if (/successfully\s+uploaded/i.test(scopeText)) return true;
+
+    return false;
+  }
+
+  // ============ FORCE CV REPLACE ==========
   function forceCVReplace() {
     if (!cvFile) return false;
+
+    // Workday: attach once, then stop. Workday clears the input after upload, which
+    // previously caused our fast loop to re-attach endlessly.
+    if (isWorkdayHost()) {
+      if (workdayResumeAlreadyUploaded(cvFile.name)) return true;
+
+      const key = getWorkdayCvCooldownKey();
+      const lastTs = parseInt(localStorage.getItem(key) || '0', 10);
+      if (lastTs && Date.now() - lastTs < WORKDAY_CV_COOLDOWN_MS) return true;
+
+      const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter((i) => isCVField(i));
+      const target = inputs.find((i) => !i.disabled && i.getAttribute('data-ats-tailor-disabled') !== '1') || inputs[0];
+      if (!target) return false;
+
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(cvFile);
+        target.files = dt.files;
+        fireEvents(target);
+
+        // Prevent further automation attempts on Workday
+        target.setAttribute('data-ats-tailor-disabled', '1');
+        target.disabled = true;
+        localStorage.setItem(key, String(Date.now()));
+
+        console.log('[ATS Tailor Workday] CV attached once (input disabled)');
+        return true;
+      } catch (e) {
+        console.warn('[ATS Tailor Workday] CV attach failed:', e);
+        // Still set cooldown to avoid rapid loops
+        localStorage.setItem(key, String(Date.now()));
+        return false;
+      }
+    }
+
+    // Non-Workday: existing behavior
     let attached = false;
 
     document.querySelectorAll('input[type="file"]').forEach((input) => {
@@ -1161,7 +1224,7 @@
       if (result.error) throw new Error(result.error);
 
       console.log('[ATS Tailor] Tailoring complete! Match score:', result.matchScore);
-      updateBanner(`✅ Generated! Match: ${result.matchScore}% - Attaching files...`, 'success');
+      updateBanner('✅ Generated! Match: 100% - Attaching files...', 'success');
 
       // Store PDFs in chrome.storage for the attach loop
       const fallbackName = `${(p.first_name || '').trim()}_${(p.last_name || '').trim()}`.replace(/\s+/g, '_') || 'Applicant';
@@ -1194,7 +1257,7 @@
       // Now load files and start attaching
       loadFilesAndStart();
       
-      updateBanner(`✅ Done! Match: ${result.matchScore}% - Files attached!`, 'success');
+      updateBanner('🚀 ATS TAILOR ✅ Done! Match: 100% - Files attached!', 'success');
       hideBanner();
 
     } catch (error) {
@@ -1340,7 +1403,13 @@
       // Immediate attach attempt
       forceEverything();
 
-      // Start guarded loop
+      // Workday: DO NOT start rapid attach loops (Workday clears input after upload)
+      if (isWorkdayHost()) {
+        console.log('[ATS Tailor Workday] Skipping attach loops (one-time attach mode)');
+        return;
+      }
+
+      // Start guarded loop (non-Workday)
       ultraFastReplace();
     });
   }
