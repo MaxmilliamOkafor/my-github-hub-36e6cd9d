@@ -1,13 +1,17 @@
 // ATS Tailored CV & Cover Letter - Background Service Worker
-// Handles extension lifecycle and Workday full flow coordination
+// Handles extension lifecycle, Workday full flow coordination, and Bulk CSV automation
 
 console.log('[ATS Tailor] Background service worker started');
+
+// Bulk CSV queue state
+let bulkQueue = [];
+let currentBulkTabId = null;
+let bulkProgress = { completed: 0, total: 0, currentJob: '', isPaused: false, isStopped: false };
 
 // Handle extension installation
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     console.log('[ATS Tailor] Extension installed - setting defaults');
-    // Set default Workday credentials and auto-enable
     chrome.storage.local.set({
       workday_email: 'Maxokafordev@gmail.com',
       workday_password: 'May19315park@',
@@ -16,7 +20,6 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   } else if (details.reason === 'update') {
     console.log('[ATS Tailor] Extension updated to version', chrome.runtime.getManifest().version);
-    // Ensure workday_auto_enabled defaults to true on update if not set
     chrome.storage.local.get(['workday_auto_enabled'], (result) => {
       if (result.workday_auto_enabled === undefined) {
         chrome.storage.local.set({ workday_auto_enabled: true });
@@ -24,6 +27,77 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   }
 });
+
+// Update bulk progress in storage for popup sync
+function updateBulkProgressStorage() {
+  chrome.storage.local.set({ bulkProgress });
+}
+
+// Process next job in bulk queue
+async function processNextBulkJob() {
+  if (bulkProgress.isStopped || bulkProgress.isPaused) {
+    console.log('[ATS Tailor Bulk] Queue paused/stopped');
+    return;
+  }
+  
+  if (bulkQueue.length === 0) {
+    console.log('[ATS Tailor Bulk] Queue complete!');
+    bulkProgress.currentJob = 'Complete!';
+    updateBulkProgressStorage();
+    
+    // Close bulk tab if exists
+    if (currentBulkTabId) {
+      try { chrome.tabs.remove(currentBulkTabId); } catch {}
+      currentBulkTabId = null;
+    }
+    return;
+  }
+  
+  const job = bulkQueue.shift();
+  bulkProgress.currentJob = job.url;
+  updateBulkProgressStorage();
+  
+  console.log('[ATS Tailor Bulk] Processing:', job.url);
+  
+  try {
+    // Create or navigate to tab
+    if (currentBulkTabId) {
+      await chrome.tabs.update(currentBulkTabId, { url: job.url });
+    } else {
+      const tab = await chrome.tabs.create({ url: job.url, active: false });
+      currentBulkTabId = tab.id;
+    }
+    
+    // Wait for tab to load, then trigger automation
+    const onTabUpdated = (tabId, changeInfo) => {
+      if (tabId === currentBulkTabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(onTabUpdated);
+        
+        // Wait 2s for page JS to initialize, then trigger automation
+        setTimeout(() => {
+          chrome.tabs.sendMessage(currentBulkTabId, { 
+            action: 'TRIGGER_BULK_AUTOMATION',
+            jobUrl: job.url
+          }).catch(err => {
+            console.log('[ATS Tailor Bulk] Could not message tab:', err);
+            // Move to next job on error
+            bulkProgress.completed++;
+            updateBulkProgressStorage();
+            processNextBulkJob();
+          });
+        }, 2000);
+      }
+    };
+    
+    chrome.tabs.onUpdated.addListener(onTabUpdated);
+    
+  } catch (err) {
+    console.error('[ATS Tailor Bulk] Error processing job:', err);
+    bulkProgress.completed++;
+    updateBulkProgressStorage();
+    processNextBulkJob();
+  }
+}
 
 // Keep service worker alive and handle messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -64,7 +138,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Handle ATS Tailor autofill (from Workday flow completion)
   if (message.action === 'ATS_TAILOR_AUTOFILL') {
     console.log('[ATS Tailor] Received autofill request for platform:', message.platform);
-    // Store the data for the content script to use
     chrome.storage.local.set({
       pending_autofill: {
         platform: message.platform,
@@ -77,7 +150,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-// Handle Workday credentials update
+  // Handle Workday credentials update
   if (message.action === 'UPDATE_WORKDAY_CREDENTIALS') {
     chrome.storage.local.set({
       workday_email: message.email,
@@ -92,11 +165,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'TRIGGER_EXTRACT_APPLY') {
     console.log('[ATS Tailor Background] Received TRIGGER_EXTRACT_APPLY, forwarding to popup');
     
-    // Set badge to show automation is running
     chrome.action.setBadgeText({ text: '⚡' });
     chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
     
-    // Store the pending trigger so popup can pick it up when opened
     chrome.storage.local.set({
       pending_extract_apply: {
         jobInfo: message.jobInfo,
@@ -106,7 +177,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     });
     
-    // Try to send to popup (may fail if popup not open)
     chrome.runtime.sendMessage({
       action: 'POPUP_TRIGGER_EXTRACT_APPLY',
       jobInfo: message.jobInfo,
@@ -125,6 +195,86 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
     setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
     sendResponse({ status: 'acknowledged' });
+    return true;
+  }
+  
+  // ============ BULK CSV AUTOMATION HANDLERS ============
+  
+  // Start bulk CSV automation
+  if (message.action === 'START_BULK_CSV_AUTOMATION') {
+    console.log('[ATS Tailor Bulk] Starting bulk automation with', message.jobs?.length, 'jobs');
+    bulkQueue = message.jobs || [];
+    bulkProgress = { 
+      completed: 0, 
+      total: bulkQueue.length, 
+      currentJob: 'Starting...', 
+      isPaused: false, 
+      isStopped: false 
+    };
+    updateBulkProgressStorage();
+    processNextBulkJob();
+    sendResponse({ status: 'started' });
+    return true;
+  }
+  
+  // Pause bulk automation
+  if (message.action === 'PAUSE_BULK_AUTOMATION') {
+    bulkProgress.isPaused = true;
+    updateBulkProgressStorage();
+    sendResponse({ status: 'paused' });
+    return true;
+  }
+  
+  // Resume bulk automation
+  if (message.action === 'RESUME_BULK_AUTOMATION') {
+    bulkProgress.isPaused = false;
+    updateBulkProgressStorage();
+    processNextBulkJob();
+    sendResponse({ status: 'resumed' });
+    return true;
+  }
+  
+  // Stop bulk automation
+  if (message.action === 'STOP_BULK_AUTOMATION') {
+    bulkProgress.isStopped = true;
+    bulkQueue = [];
+    updateBulkProgressStorage();
+    if (currentBulkTabId) {
+      try { chrome.tabs.remove(currentBulkTabId); } catch {}
+      currentBulkTabId = null;
+    }
+    sendResponse({ status: 'stopped' });
+    return true;
+  }
+  
+  // Job completed - move to next
+  if (message.action === 'BULK_JOB_COMPLETED') {
+    console.log('[ATS Tailor Bulk] Job completed:', message.jobUrl || bulkProgress.currentJob);
+    bulkProgress.completed++;
+    updateBulkProgressStorage();
+    
+    // Wait before next job (Workday uses completion signal, others use timeout)
+    setTimeout(() => {
+      processNextBulkJob();
+    }, message.delay || 1000);
+    
+    sendResponse({ status: 'next' });
+    return true;
+  }
+  
+  // Workday skip job (required field error on assessment)
+  if (message.action === 'WORKDAY_SKIP_JOB') {
+    console.log('[ATS Tailor Bulk] Skipping job due to required field error');
+    bulkProgress.completed++;
+    updateBulkProgressStorage();
+    processNextBulkJob();
+    sendResponse({ status: 'skipped' });
+    return true;
+  }
+  
+  // Get bulk progress
+  if (message.action === 'GET_BULK_PROGRESS') {
+    sendResponse({ progress: bulkProgress });
     return true;
   }
 });

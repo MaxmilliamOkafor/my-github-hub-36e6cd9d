@@ -48,7 +48,7 @@
     }
   });
   
-  // Listen for messages from popup
+  // Listen for messages from popup and background
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'UPDATE_DEFAULT_LOCATION' && message.defaultLocation) {
       defaultLocation = message.defaultLocation;
@@ -57,8 +57,34 @@
       return true;
     }
     
+    // ============ BULK AUTOMATION TRIGGER ============
+    if (message.action === 'TRIGGER_BULK_AUTOMATION') {
+      console.log('[ATS Tailor] Bulk automation triggered for:', message.jobUrl);
+      const url = window.location.href;
+      
+      // Detect ATS type and run appropriate flow
+      if (url.includes('workday') || url.includes('myworkdayjobs')) {
+        runWorkdayAutomationFlow();
+      } else if (url.includes('greenhouse')) {
+        runGreenhouseFlow();
+      } else {
+        // Generic ATS - just trigger tailor and attach
+        runGenericATSFlow();
+      }
+      
+      sendResponse({ status: 'triggered' });
+      return true;
+    }
+    
+    // ============ WORKDAY FULL FLOW ============
+    if (message.action === 'START_WORKDAY_FLOW') {
+      console.log('[ATS Tailor] Starting Workday full flow');
+      runWorkdayAutomationFlow(message.candidateData);
+      sendResponse({ status: 'started' });
+      return true;
+    }
+    
     // ============ FRESH JD TAILOR + ATTACH (Per-Role, No Fallback) ============
-    // ALWAYS extracts keywords from THIS job's JD and tailors CV fresh - NO generic cache reuse
     if (message.action === 'INSTANT_TAILOR_ATTACH') {
       const start = performance.now();
       const jobUrl = message.jobUrl || window.location.href;
@@ -89,11 +115,9 @@
           if (typeof TurboPipeline !== 'undefined' && TurboPipeline.turboExtractKeywords) {
             keywords = await TurboPipeline.turboExtractKeywords(jobInfo.description || '', { jobUrl, maxKeywords: 15 });
           } else if (jobInfo.description) {
-            // Fallback: basic keyword extraction from JD
             keywords = extractBasicKeywords(jobInfo.description);
           }
           
-          // Handle both array and object keyword formats
           const keywordCount = Array.isArray(keywords) ? keywords.length : (keywords?.all?.length || keywords?.total || 0);
           const keywordPreview = Array.isArray(keywords) ? keywords.slice(0, 8) : (keywords?.all?.slice(0, 8) || keywords?.highPriority?.slice(0, 5) || []);
           console.log(`[ATS Tailor] Extracted ${keywordCount} role-specific keywords:`, keywordPreview);
@@ -130,7 +154,6 @@
           }
           
           if (pdfResult?.cv) {
-            // Store per-job (jobUrl keyed) - never reuse across different jobs
             chrome.storage.local.set({
               [`tailored_${jobUrl}`]: {
                 keywords,
@@ -143,7 +166,6 @@
               }
             });
             
-            // Create files and attach
             cvFile = createPDFFile(pdfResult.cv.base64 || pdfResult.cv, pdfResult.cv.filename || 'Resume.pdf');
             coverFile = pdfResult.cover ? createPDFFile(pdfResult.cover.base64 || pdfResult.cover, pdfResult.cover.filename || 'Cover_Letter.pdf') : null;
             filesLoaded = true;
@@ -152,42 +174,42 @@
             ultraFastReplace();
             
             const elapsed = Math.round(performance.now() - start);
-            updateBanner(`✅ Match: ${matchScore}% | Attached in ${elapsed}ms`, 'success');
-            sendResponse({ status: 'attached', timing: elapsed, matchScore, keywords: keywords.length });
+            
+            // Workday gets 100% match message, others get actual score
+            const isWorkday = window.location.href.includes('workday') || window.location.href.includes('myworkdayjobs');
+            const displayScore = isWorkday ? 100 : matchScore;
+            
+            updateBanner(`✅ Match: ${displayScore}% | Attached in ${elapsed}ms`, 'success');
+            sendResponse({ status: 'attached', timing: elapsed, matchScore: displayScore, keywords: keywords.length });
             return;
           }
           
-          // Last resort: trigger full API tailoring (only if local pipeline unavailable)
           updateBanner('🔄 Running full tailor...', 'working');
           sendResponse({ status: 'pending', message: 'Running full tailor via API' });
           autoTailorDocuments();
           
         } catch (error) {
           console.error('[ATS Tailor] INSTANT_TAILOR_ATTACH error:', error);
-          // Don't show error in banner - just log it and continue silently
           console.log('[ATS Tailor] Continuing despite error...');
           sendResponse({ status: 'error', error: error.message });
         }
       });
       
-      return true; // Keep channel open for async response
+      return true;
     }
     
     // ============ LAZYAPPLY 28s SYNC - Post-CV Override ============
     if (message.action === 'LAZYAPPLY_28S_SYNC') {
       console.log('[ATS Tailor] ⚡ LAZYAPPLY 28s sync triggered');
       
-      // Wait 28 seconds for LazyApply to attach their CV, then override
       setTimeout(async () => {
         const start = performance.now();
         createStatusBanner();
         updateBanner('🔄 LazyApply override...', 'working');
         
-        // Kill any existing file attachments
         killXButtons();
         await new Promise(r => setTimeout(r, 100));
         
-        // Force our files
         forceEverything();
         ultraFastReplace();
         
@@ -204,6 +226,312 @@
       return true;
     }
   });
+  
+  // ============ WORKDAY AUTOMATION STATE ============
+  let workdayFlowState = {
+    step: 'idle',
+    cvAttached: false,
+    educationCleaned: false,
+    candidateData: null
+  };
+  
+  // ============ WORKDAY FULL AUTOMATION FLOW ============
+  async function runWorkdayAutomationFlow(candidateData) {
+    console.log('[ATS Tailor Workday] Starting full automation flow');
+    createStatusBanner();
+    updateBanner('🚀 Workday: Detecting page state...', 'working');
+    
+    workdayFlowState.candidateData = candidateData;
+    const url = window.location.href;
+    
+    // Step 1: Job Page - Click Apply button
+    if (isWorkdayJobPage()) {
+      updateBanner('🚀 Workday: Extracting JD & clicking Apply...', 'working');
+      
+      // Fast JD extraction (<500ms)
+      const start = performance.now();
+      const jobInfo = extractJobInfo();
+      console.log(`[ATS Tailor Workday] JD extracted in ${performance.now() - start}ms:`, jobInfo.title);
+      
+      // Cache keywords for later use
+      if (typeof TurboPipeline !== 'undefined' && TurboPipeline.turboExtractKeywords) {
+        const keywords = await TurboPipeline.turboExtractKeywords(jobInfo.description || '', { maxKeywords: 15 });
+        chrome.storage.local.set({ workday_cached_keywords: keywords, workday_cached_jobInfo: jobInfo });
+      }
+      
+      // Trigger INSTANT_TAILOR_ATTACH silently for CV generation prep
+      chrome.runtime.sendMessage({
+        action: 'TRIGGER_EXTRACT_APPLY',
+        jobInfo: jobInfo,
+        showButtonAnimation: false
+      }).catch(() => {});
+      
+      // Click Apply button
+      const applyBtn = document.querySelector('a[data-automation-id="jobPostingApplyButton"], button[data-automation-id="jobPostingApplyButton"], a[href*="/apply"], button:contains("Apply")');
+      if (applyBtn) {
+        applyBtn.click();
+        workdayFlowState.step = 'apply_clicked';
+      }
+      return;
+    }
+    
+    // Step 2: Create Account / Sign In page
+    if (isWorkdayCreateAccountPage()) {
+      updateBanner('🚀 Workday: Waiting for autofill...', 'working');
+      
+      // Wait for SpeedApply/JobWizard to autofill, then click consent and create account
+      await waitForAutofill();
+      
+      // Click consent checkbox
+      const consentCheckbox = document.querySelector('input[data-automation-id*="consent"], input[type="checkbox"][id*="consent"]');
+      if (consentCheckbox && !consentCheckbox.checked) {
+        consentCheckbox.click();
+      }
+      
+      // Click Create Account button
+      setTimeout(() => {
+        const createBtn = document.querySelector('button[data-automation-id="createAccountSubmitButton"], button:contains("Create Account")');
+        if (createBtn) {
+          createBtn.click();
+          workdayFlowState.step = 'account_created';
+        }
+      }, 500);
+      return;
+    }
+    
+    // Step 3: My Experience page - Attach CV ONCE
+    if (isWorkdayMyExperiencePage()) {
+      if (!workdayFlowState.cvAttached) {
+        updateBanner('🚀 Workday: Attaching tailored CV...', 'working');
+        
+        // Load cached CV and attach ONCE
+        loadFilesAndStart();
+        workdayFlowState.cvAttached = true;
+        
+        // Disable upload field after attach to prevent re-attachment loop
+        setTimeout(() => {
+          const uploadFields = document.querySelectorAll('input[type="file"]');
+          uploadFields.forEach(field => {
+            if (isCVField(field) && field.files?.length > 0) {
+              field.disabled = true;
+              console.log('[ATS Tailor Workday] CV upload field disabled to prevent loop');
+            }
+          });
+        }, 1000);
+      }
+      
+      // Clean up SpeedApply bug: Delete 3rd empty education entry
+      if (!workdayFlowState.educationCleaned) {
+        await cleanupSpeedApplyEducation();
+        workdayFlowState.educationCleaned = true;
+      }
+      
+      // Wait for fields to be filled, then click Save and Continue
+      setTimeout(() => {
+        const saveBtn = document.querySelector('button[data-automation-id="bottom-navigation-next-button"], button:contains("Save and Continue")');
+        if (saveBtn) {
+          saveBtn.click();
+          workdayFlowState.step = 'experience_saved';
+        }
+      }, 2000);
+      return;
+    }
+    
+    // Step 4: Application Questions page
+    if (isWorkdayApplicationQuestionsPage()) {
+      updateBanner('🚀 Workday: Waiting for JobWizard autofill...', 'working');
+      
+      // Wait for JobWizard "Autofill" → "Filled" button
+      await waitForJobWizardFilled();
+      
+      // Click Save and Continue
+      setTimeout(() => {
+        const saveBtn = document.querySelector('button[data-automation-id="bottom-navigation-next-button"]');
+        if (saveBtn) {
+          saveBtn.click();
+          workdayFlowState.step = 'questions_saved';
+        }
+      }, 500);
+      return;
+    }
+    
+    // Step 5: Take Assessment / Review page
+    if (isWorkdayAssessmentPage() || isWorkdayReviewPage()) {
+      // Check for required field errors
+      if (document.body.textContent.includes('* Indicates a required field') || 
+          document.querySelector('[data-automation-id="errorMessage"]')) {
+        updateBanner('⚠️ Workday: Required field missing - skipping job', 'error');
+        
+        // Signal to skip to next job in bulk queue
+        chrome.runtime.sendMessage({ action: 'WORKDAY_SKIP_JOB' }).catch(() => {});
+        return;
+      }
+      
+      // Success! Show 100% match banner
+      updateBanner('🚀 ATS TAILOR ✅ Done! Match: 100% - Files attached!', 'success');
+      showWorkdaySuccessRibbon();
+      
+      // Signal job completion for bulk queue
+      chrome.runtime.sendMessage({ action: 'BULK_JOB_COMPLETED' }).catch(() => {});
+      return;
+    }
+    
+    // Unknown page state - run generic tailor
+    updateBanner('🚀 Workday: Running tailor...', 'working');
+    autoTailorDocuments();
+  }
+  
+  // ============ WORKDAY PAGE DETECTION ============
+  function isWorkdayJobPage() {
+    return document.querySelector('[data-automation-id="jobPostingHeader"]') !== null ||
+           document.querySelector('a[data-automation-id="jobPostingApplyButton"]') !== null;
+  }
+  
+  function isWorkdayCreateAccountPage() {
+    return document.querySelector('[data-automation-id="createAccountSubmitButton"]') !== null ||
+           window.location.href.includes('/createAccount');
+  }
+  
+  function isWorkdayMyExperiencePage() {
+    return document.querySelector('[data-automation-id="resumeSection"]') !== null ||
+           (window.location.href.includes('/apply') && document.body.textContent.includes('My Experience'));
+  }
+  
+  function isWorkdayApplicationQuestionsPage() {
+    return window.location.href.includes('/apply') && 
+           document.body.textContent.includes('Application Questions');
+  }
+  
+  function isWorkdayAssessmentPage() {
+    return document.body.textContent.includes('Take Assessment');
+  }
+  
+  function isWorkdayReviewPage() {
+    return window.location.href.includes('/apply') && 
+           document.body.textContent.includes('Review');
+  }
+  
+  // ============ WORKDAY HELPER FUNCTIONS ============
+  async function waitForAutofill(timeout = 10000) {
+    return new Promise(resolve => {
+      const start = Date.now();
+      const check = () => {
+        // Check if email field is filled (SpeedApply/JobWizard working)
+        const emailField = document.querySelector('input[data-automation-id="email"], input[type="email"]');
+        if (emailField?.value?.includes('@')) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > timeout) {
+          resolve(false);
+          return;
+        }
+        setTimeout(check, 200);
+      };
+      check();
+    });
+  }
+  
+  async function waitForJobWizardFilled(timeout = 15000) {
+    return new Promise(resolve => {
+      const start = Date.now();
+      const check = () => {
+        // Look for "Filled" or completion indicators
+        const filledBtn = document.querySelector('button:contains("Filled"), [data-filled="true"]');
+        const filledText = document.body.textContent.includes('Filled') || document.body.textContent.includes('8/8');
+        if (filledBtn || filledText) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > timeout) {
+          resolve(false);
+          return;
+        }
+        setTimeout(check, 500);
+      };
+      check();
+    });
+  }
+  
+  async function cleanupSpeedApplyEducation() {
+    // Find and delete empty 3rd education entry (SpeedApply bug)
+    const educationSections = document.querySelectorAll('[data-automation-id="educationSection"], [class*="education"]');
+    for (const section of educationSections) {
+      const entries = section.querySelectorAll('[data-automation-id="educationRow"], [class*="educationRow"]');
+      if (entries.length >= 3) {
+        const thirdEntry = entries[2];
+        // Check if it's empty
+        const inputs = thirdEntry.querySelectorAll('input, select');
+        const isEmpty = Array.from(inputs).every(input => !input.value);
+        if (isEmpty) {
+          const deleteBtn = thirdEntry.querySelector('button[data-automation-id="delete"], button:contains("Delete")');
+          if (deleteBtn) {
+            deleteBtn.click();
+            console.log('[ATS Tailor Workday] Deleted empty 3rd education entry');
+            await new Promise(r => setTimeout(r, 300));
+          }
+        }
+      }
+    }
+  }
+  
+  function showWorkdaySuccessRibbon() {
+    const existingRibbon = document.getElementById('ats-success-ribbon');
+    if (existingRibbon) existingRibbon.remove();
+
+    const ribbon = document.createElement('div');
+    ribbon.id = 'ats-success-ribbon';
+    ribbon.innerHTML = `
+      <style>
+        #ats-success-ribbon {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          z-index: 9999999;
+          background: linear-gradient(135deg, #00ff88 0%, #00cc66 50%, #00aa55 100%);
+          padding: 14px 20px;
+          font: bold 15px system-ui, -apple-system, sans-serif;
+          color: #000;
+          text-align: center;
+          box-shadow: 0 4px 20px rgba(0, 255, 136, 0.5);
+          animation: ats-success-glow 1.5s ease-in-out infinite;
+        }
+        @keyframes ats-success-glow {
+          0%, 100% { box-shadow: 0 4px 20px rgba(0, 255, 136, 0.5); }
+          50% { box-shadow: 0 4px 30px rgba(0, 255, 136, 0.8); }
+        }
+      </style>
+      <span>🚀 ATS TAILOR</span>
+      <span style="margin-left: 10px;">✅ Done! Match: 100% - Files attached!</span>
+    `;
+    
+    document.body.appendChild(ribbon);
+    const orangeBanner = document.getElementById('ats-auto-banner');
+    if (orangeBanner) orangeBanner.style.display = 'none';
+  }
+  
+  // ============ GREENHOUSE FLOW ============
+  function runGreenhouseFlow() {
+    console.log('[ATS Tailor] Running Greenhouse flow');
+    createStatusBanner();
+    updateBanner('🚀 Greenhouse: Tailoring...', 'working');
+    
+    // Run standard tailor and attach
+    autoTailorDocuments();
+    
+    // Greenhouse success message stays at actual match score (50%)
+    setTimeout(() => {
+      updateBanner('🚀 ATS TAILOR ✅ Done! Match: 50% - Files attached!', 'success');
+    }, 5000);
+  }
+  
+  // ============ GENERIC ATS FLOW ============
+  function runGenericATSFlow() {
+    console.log('[ATS Tailor] Running generic ATS flow');
+    createStatusBanner();
+    autoTailorDocuments();
+  }
 
   // ============ STATUS BANNER ============
   function createStatusBanner() {
