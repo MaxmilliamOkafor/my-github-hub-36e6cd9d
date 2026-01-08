@@ -193,6 +193,17 @@ class ATSTailor {
       this.showToast(enabled ? 'Auto tailor enabled' : 'Auto tailor disabled', 'success');
     });
     
+    // Bulk CSV Automation
+    document.getElementById('csvFileInput')?.addEventListener('change', (e) => this.handleCsvUpload(e));
+    document.getElementById('parseCsvBtn')?.addEventListener('click', () => this.parseCsv());
+    document.getElementById('startBulkAutomation')?.addEventListener('click', () => this.startBulkAutomation());
+    document.getElementById('pauseBulkBtn')?.addEventListener('click', () => this.pauseBulkAutomation());
+    document.getElementById('resumeBulkBtn')?.addEventListener('click', () => this.resumeBulkAutomation());
+    document.getElementById('stopBulkBtn')?.addEventListener('click', () => this.stopBulkAutomation());
+    
+    // Start bulk progress polling
+    this.startBulkProgressPolling();
+    
     // View Extracted Keywords Button (fast local extraction)
     document.getElementById('viewKeywordsBtn')?.addEventListener('click', () => this.viewExtractedKeywords());
     
@@ -531,6 +542,109 @@ class ATSTailor {
     });
     
     this.showToast(`Default location set to: ${location}`, 'success');
+  }
+  
+  // ============ BULK CSV AUTOMATION METHODS ============
+  
+  handleCsvUpload(e) {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      this.bulkCsvRaw = event.target?.result || '';
+      this.showToast('CSV loaded - click Parse CSV', 'success');
+    };
+    reader.readAsText(file);
+  }
+  
+  parseCsv() {
+    if (!this.bulkCsvRaw) {
+      this.showToast('Upload a CSV file first', 'error');
+      return;
+    }
+    
+    const lines = this.bulkCsvRaw.split('\n').map(l => l.trim()).filter(Boolean);
+    this.bulkCsvJobs = lines.slice(1).map(line => {
+      const [url] = line.split(',').map(s => s.trim().replace(/"/g, ''));
+      return { url, status: 'pending' };
+    }).filter(job => job.url && (job.url.includes('job') || job.url.includes('career') || job.url.includes('workday') || job.url.includes('greenhouse')));
+    
+    this.updateBulkUI();
+    this.showToast(`Parsed ${this.bulkCsvJobs.length} job URLs`, 'success');
+  }
+  
+  updateBulkUI() {
+    const preview = document.getElementById('csvPreview');
+    const stats = document.getElementById('csvStats');
+    const startBtn = document.getElementById('startBulkAutomation');
+    
+    if (this.bulkCsvJobs?.length) {
+      if (stats) stats.textContent = `${this.bulkCsvJobs.length} jobs parsed`;
+      preview?.classList.remove('hidden');
+      if (startBtn) startBtn.disabled = false;
+    }
+  }
+  
+  async startBulkAutomation() {
+    if (!this.bulkCsvJobs?.length) {
+      this.showToast('Parse CSV first', 'error');
+      return;
+    }
+    
+    this.showToast('Starting bulk automation...', 'success');
+    
+    document.getElementById('bulkControls')?.classList.remove('hidden');
+    document.getElementById('startBulkAutomation').disabled = true;
+    
+    chrome.runtime.sendMessage({
+      action: 'START_BULK_CSV_AUTOMATION',
+      jobs: this.bulkCsvJobs
+    });
+  }
+  
+  pauseBulkAutomation() {
+    chrome.runtime.sendMessage({ action: 'PAUSE_BULK_AUTOMATION' });
+    document.getElementById('pauseBulkBtn')?.classList.add('hidden');
+    document.getElementById('resumeBulkBtn')?.classList.remove('hidden');
+    this.showToast('Bulk automation paused', 'success');
+  }
+  
+  resumeBulkAutomation() {
+    chrome.runtime.sendMessage({ action: 'RESUME_BULK_AUTOMATION' });
+    document.getElementById('pauseBulkBtn')?.classList.remove('hidden');
+    document.getElementById('resumeBulkBtn')?.classList.add('hidden');
+    this.showToast('Bulk automation resumed', 'success');
+  }
+  
+  stopBulkAutomation() {
+    chrome.runtime.sendMessage({ action: 'STOP_BULK_AUTOMATION' });
+    document.getElementById('bulkControls')?.classList.add('hidden');
+    document.getElementById('startBulkAutomation').disabled = false;
+    this.showToast('Bulk automation stopped', 'success');
+  }
+  
+  startBulkProgressPolling() {
+    setInterval(() => {
+      chrome.runtime.sendMessage({ action: 'GET_BULK_PROGRESS' }, (response) => {
+        if (response?.progress) {
+          this.updateBulkProgress(response.progress);
+        }
+      });
+    }, 1000);
+  }
+  
+  updateBulkProgress(progress) {
+    const percent = progress.total ? (progress.completed / progress.total * 100) : 0;
+    const progressFill = document.getElementById('bulkProgressFill');
+    const statusEl = document.getElementById('currentJobStatus');
+    const statsEl = document.getElementById('csvStats');
+    
+    if (progressFill) progressFill.style.width = `${percent}%`;
+    if (statusEl) statusEl.textContent = progress.currentJob || 'Ready';
+    if (statsEl && progress.total > 0) {
+      statsEl.textContent = `${progress.completed}/${progress.total} completed`;
+    }
   }
 
   async runWorkdayFlow() {

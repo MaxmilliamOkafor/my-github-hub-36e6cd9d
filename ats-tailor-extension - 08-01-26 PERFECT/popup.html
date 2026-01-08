@@ -402,6 +402,29 @@
           <span class="btn-text">Bulk Apply Dashboard</span>
         </button>
       </div>
+      
+      <!-- Bulk CSV Automation Section -->
+      <div id="bulkCsvSection" class="card bulk-csv-card">
+        <h3>📋 Bulk CSV Automation</h3>
+        <p class="bulk-csv-hint">Upload CSV with job URLs, auto-apply to all</p>
+        <input type="file" id="csvFileInput" accept=".csv" class="csv-input" />
+        <div class="bulk-csv-buttons">
+          <button id="parseCsvBtn" class="btn btn-secondary">Parse CSV</button>
+          <button id="startBulkAutomation" class="btn btn-success" disabled>🚀 Start</button>
+        </div>
+        <div class="bulk-controls hidden" id="bulkControls">
+          <button id="pauseBulkBtn" class="btn btn-warning btn-sm">⏸️ Pause</button>
+          <button id="resumeBulkBtn" class="btn btn-accent btn-sm hidden">▶️ Resume</button>
+          <button id="stopBulkBtn" class="btn btn-danger btn-sm">⏹️ Stop</button>
+        </div>
+        <div id="csvPreview" class="csv-preview hidden">
+          <p class="csv-stats" id="csvStats">0 jobs parsed</p>
+          <div class="progress-bar bulk-progress">
+            <div id="bulkProgressFill" class="progress-fill" style="width:0%"></div>
+          </div>
+          <p class="current-job-status" id="currentJobStatus">Ready</p>
+        </div>
+      </div>
 
       <!-- Simplify ATS Score Breakdown -->
       <div class="simplify-score-section hidden" id="simplifyScoreSection">
